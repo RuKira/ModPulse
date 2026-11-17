@@ -1,4 +1,4 @@
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Opens URLs in the user's default browser.

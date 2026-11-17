@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using CheckMods.Models;
+using ModPulse.Models;
 
-namespace CheckMods.Utils;
+namespace ModPulse.Utils;
 
 /// <summary>
 /// Builds the GitHub "new issue" URL for reporting ignored-update suggestions. Pre-fills the ignore-suggestion issue
@@ -11,8 +11,7 @@ namespace CheckMods.Utils;
 internal static class IgnoreReportUrl
 {
     /// <summary>Base "new issue" URL targeting the ignore-suggestion issue form.</summary>
-    private const string BaseUrl =
-        "https://github.com/refringe/SPT-Check-Mods/issues/new?template=report-ignored-updates.yml";
+    private const string BaseUrl = Configuration.AppIdentity.NewIssueUrl + "?template=report-ignored-updates.yml";
 
     /// <summary>Issue-form field id that receives the pre-filled JSON (must match the template's field id).</summary>
     private const string FieldId = "ignored_versions";

@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Where an <see cref="IgnoredUpdate"/> entry came from.

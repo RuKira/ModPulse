@@ -1,10 +1,10 @@
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Microsoft.Extensions.Logging;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Service responsible for reconciling server and client mod components. Matches components of the same mod and selects

@@ -1,19 +1,19 @@
-using CheckMods.Models;
+using ModPulse.Models;
 
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
-/// Checks whether a newer version of Check Mods is available on the Forge.
+/// Checks whether a newer version of ModPulse is published on GitHub Releases.
 /// </summary>
 public interface IUpdateCheckService
 {
     /// <summary>
-    /// Checks the Forge for a newer version of Check Mods, relative to the running build.
+    /// Checks GitHub Releases for a newer version of ModPulse, relative to the running build.
     /// </summary>
-    /// <param name="sptVersion">The installed SPT version, used for compatibility filtering by the Forge API.</param>
+    /// <param name="sptVersion">The installed SPT version (unused by the GitHub check; kept for the call site).</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
-    /// <returns>The update status; API errors resolve to <see cref="CheckModsUpdateStatus.Unavailable"/>.</returns>
-    Task<CheckModsUpdateResult> CheckAsync(
+    /// <returns>The update status; API errors resolve to <see cref="ModPulseUpdateStatus.Unavailable"/>.</returns>
+    Task<ModPulseUpdateResult> CheckAsync(
         SemanticVersioning.Version sptVersion,
         CancellationToken cancellationToken = default
     );

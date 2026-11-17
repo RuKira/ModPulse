@@ -1,11 +1,11 @@
-using CheckMods.Configuration;
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Configuration;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Spectre.Console;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Spectre.Console implementation of <see cref="IModCheckReporter"/>.
@@ -48,7 +48,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     {
         var tagline = _bannerTaglines[Random.Shared.Next(_bannerTaglines.Length)];
 
-        AnsiConsole.Write(new FigletText("Check Mods").LeftJustified().Color(Color.Blue));
+        AnsiConsole.Write(new FigletText("ModPulse").LeftJustified().Color(Color.Blue));
         AnsiConsole.MarkupLine("[fuchsia]A tool to check for mod issues and updates.[/]");
         AnsiConsole.MarkupLine($"[grey]{tagline}[/]");
         AnsiConsole.MarkupLine("[link]https://sp-mod.com[/]");
@@ -205,13 +205,13 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     }
 
     /// <inheritdoc />
-    public void CheckModsUpdate(CheckModsUpdateResult result, SemanticVersioning.Version sptVersion)
+    public void ModPulseUpdate(ModPulseUpdateResult result, SemanticVersioning.Version sptVersion)
     {
         switch (result.Status)
         {
-            case CheckModsUpdateStatus.UpdateAvailable:
+            case ModPulseUpdateStatus.UpdateAvailable:
                 AnsiConsole.MarkupLine(
-                    $"[yellow]A new version of Check Mods is available:[/] [bold]v{(result.LatestVersion ?? "?").EscapeMarkup()}[/] [grey](you have v{result.CurrentVersion.EscapeMarkup()})[/]"
+                    $"[yellow]A new version of ModPulse is available:[/] [bold]v{(result.LatestVersion ?? "?").EscapeMarkup()}[/] [grey](you have v{result.CurrentVersion.EscapeMarkup()})[/]"
                 );
                 if (!string.IsNullOrWhiteSpace(result.DownloadLink))
                 {
@@ -219,31 +219,14 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
                 }
                 break;
 
-            case CheckModsUpdateStatus.UpToDate:
+            case ModPulseUpdateStatus.UpToDate:
                 AnsiConsole.MarkupLine(
-                    $"[green]Check Mods is up to date (v{result.CurrentVersion.EscapeMarkup()}).[/]"
+                    $"[green]ModPulse is up to date (v{result.CurrentVersion.EscapeMarkup()}).[/]"
                 );
-                break;
-
-            case CheckModsUpdateStatus.IncompatibleWithSpt:
-                AnsiConsole.MarkupLine(
-                    $"[grey]A newer version of Check Mods exists but isn't compatible with SPT {sptVersion.ToString().EscapeMarkup()}.[/]"
-                );
-                break;
-
-            case CheckModsUpdateStatus.UnrecognizedBuild:
-                AnsiConsole.MarkupLine(
-                    $"[grey]You're running an unrecognized Check Mods build (v{result.CurrentVersion.EscapeMarkup()}). Consider the stable version on the Forge: v{(result.LatestVersion ?? "?").EscapeMarkup()}.[/]"
-                );
-                if (!string.IsNullOrWhiteSpace(result.DownloadLink))
-                {
-                    AnsiConsole.MarkupLine($"[grey]Download:[/] [link]{result.DownloadLink.EscapeMarkup()}[/]");
-                }
-
                 break;
 
             default:
-                AnsiConsole.MarkupLine("[grey]Could not check for Check Mods updates.[/]");
+                AnsiConsole.MarkupLine("[grey]Could not check for ModPulse updates.[/]");
                 break;
         }
 
@@ -256,7 +239,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     {
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[yellow]No mods found.[/]");
-        AnsiConsole.MarkupLine("[grey]Server mods should be located in:[/] SPT/user/mods");
+        AnsiConsole.MarkupLine("[grey]Server mods should be located in:[/] user/mods [grey](game root on 3.x, SPT/ on 4.0, SPT_Runtime/ on 4.1)[/]");
         AnsiConsole.MarkupLine("[grey]Client mods should be located in:[/] BepInEx/plugins");
         AnsiConsole.WriteLine();
     }
@@ -445,7 +428,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
         if (serverInClient.Count > 0)
         {
             var tree = new Tree(
-                "[yellow]Server mods found in the client folder[/] [grey](BepInEx/plugins)[/][yellow]. Move them into[/] [grey]SPT/user/mods[/]"
+                "[yellow]Server mods found in the client folder[/] [grey](BepInEx/plugins)[/][yellow]. Move them into[/] [grey]user/mods[/] [yellow]in the SPT server folder[/]"
             );
             foreach (var mod in serverInClient)
             {
@@ -458,7 +441,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
         if (clientInServer.Count > 0)
         {
             var tree = new Tree(
-                "[yellow]Client mods found in the server folder[/] [grey](SPT/user/mods)[/][yellow]. Move them into[/] [grey]BepInEx/plugins[/]"
+                "[yellow]Client mods found in the server folder[/] [grey](user/mods)[/][yellow]. Move them into[/] [grey]BepInEx/plugins[/]"
             );
             foreach (var mod in clientInServer)
             {
@@ -839,7 +822,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
 
             var latestVersionDisplay = FormatVersionDisplay(mod);
 
-            var nameDisplay = FormatModLink(displayName, mod.ApiUrl);
+            var nameDisplay = WithLegacyTag(FormatModLink(displayName, mod.ApiUrl), mod);
 
             table.AddRow(
                 nameDisplay,
@@ -855,6 +838,13 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
             "[grey]Version colors: [green]Up to date[/] | [red]Update available[/] | [darkorange]Update blocked[/] | [blue]Newer than latest[/] | [grey]Ignored[/][/]"
         );
 
+        if (verifiedMods.Any(m => m.IsLegacy))
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]{LegacyTag} Installed on legacy SPT: the installed version is assumed correct, and only updates published for your SPT version are shown.[/]"
+            );
+        }
+
         // Display mods with available updates (excluding ones the user has dismissed as false positives)
         var modsWithUpdates = verifiedMods
             .Where(m => m.UpdateStatus == UpdateStatus.UpdateAvailable && !m.UpdateSuppressed)
@@ -867,7 +857,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
 
             foreach (var mod in modsWithUpdates)
             {
-                var nameDisplay = FormatModLink(mod.DisplayName, mod.ApiUrl);
+                var nameDisplay = WithLegacyTag(FormatModLink(mod.DisplayName, mod.ApiUrl), mod);
 
                 var modNode = updatesTree.AddNode(nameDisplay);
                 modNode.AddNode(
@@ -935,7 +925,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
         AnsiConsole.MarkupLine("[grey]Expert tip: Read the mod page before installing or updating mods.[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine(
-            "[white]Find an issue [italic]with this tool[/]? Find Refringe on Discord, or [link=https://github.com/refringe/SPT-Check-Mods/issues/new]submit a bug report[/].[/]"
+            "[white]Find an issue [italic]with this tool[/]? [link=" + AppIdentity.NewIssueUrl + "]Submit a bug report[/].[/]"
         );
         AnsiConsole.WriteLine();
     }
@@ -944,7 +934,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     public bool PromptFetchRemoteIgnores()
     {
         return AnsiConsole.Prompt(
-            new ConfirmationPrompt("Fetch the latest community ignore list from the Forge?") { DefaultValue = false }
+            new ConfirmationPrompt("Fetch the latest community ignore list (known version mismatches)?") { DefaultValue = false }
         );
     }
 
@@ -1080,7 +1070,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
             EndOfRunChoice.OpenUpdatePages =>
                 $"Open {openableUpdateCount} mod page{Plural(openableUpdateCount)} with updates in your browser",
             EndOfRunChoice.ManageIgnoredUpdates => "Manage ignored updates",
-            EndOfRunChoice.Exit => "Close Check Mods",
+            EndOfRunChoice.Exit => "Close ModPulse",
             _ => choice.ToString(),
         };
     }
@@ -1167,6 +1157,17 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
                 : author;
 
         return (displayName, displayAuthor);
+    }
+
+    /// <summary>Label shown next to mods on a legacy SPT install.</summary>
+    private const string LegacyTag = "[grey](Legacy)[/]";
+
+    /// <summary>
+    /// Appends the legacy label to already-formatted name markup when the mod is legacy.
+    /// </summary>
+    private static string WithLegacyTag(string nameMarkup, Mod mod)
+    {
+        return mod.IsLegacy ? $"{nameMarkup} {LegacyTag}" : nameMarkup;
     }
 
     /// <summary>

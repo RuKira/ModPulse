@@ -1,6 +1,6 @@
-using CheckMods.Models;
+using ModPulse.Models;
 
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Drives the end-of-run interaction: offers to manage ignored updates, runs the multi-select prompt, persists the

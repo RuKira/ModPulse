@@ -1,4 +1,4 @@
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Specifies the update status of a mod compared to the latest available version.

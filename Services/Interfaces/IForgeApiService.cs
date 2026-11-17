@@ -1,7 +1,7 @@
-using CheckMods.Models;
+using ModPulse.Models;
 using OneOf;
 
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Interacts with the Forge API to search mods, validate versions, and retrieve mod data.
@@ -127,6 +127,7 @@ public interface IForgeApiService
     /// Retrieves dependency information for multiple mods in a single API call.
     /// </summary>
     /// <param name="modVersions">Collection of identifier (mod ID or GUID) and version pairs.</param>
+    /// <param name="sptVersion">The installed SPT version; Forge requires it for dependency lookups.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>
     /// One of:
@@ -136,6 +137,7 @@ public interface IForgeApiService
     /// </returns>
     Task<OneOf<List<ModDependency>, NotFound, ApiError>> GetModDependenciesAsync(
         IEnumerable<(string Identifier, string Version)> modVersions,
+        SemanticVersioning.Version? sptVersion,
         CancellationToken cancellationToken = default
     );
 }

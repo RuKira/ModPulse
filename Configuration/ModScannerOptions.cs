@@ -1,4 +1,4 @@
-namespace CheckMods.Configuration;
+namespace ModPulse.Configuration;
 
 /// <summary>
 /// Configuration options for the mod scanner service.

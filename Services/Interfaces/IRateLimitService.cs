@@ -1,4 +1,4 @@
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Rate-limits and retries API calls, applying backoff that honors the Retry-After header.

@@ -1,4 +1,4 @@
-namespace CheckMods.Utils;
+namespace ModPulse.Utils;
 
 /// <summary>
 /// Provides centralized name normalization for mod matching operations.

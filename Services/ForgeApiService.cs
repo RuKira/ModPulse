@@ -1,16 +1,16 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using CheckMods.Configuration;
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Configuration;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OneOf;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Service for interacting with the Forge API with rate limiting. Handles mod searching, version validation, and data
@@ -23,6 +23,7 @@ public sealed partial class ForgeApiService(
     HttpClient httpClient,
     IRateLimitService rateLimitService,
     IMemoryCache cache,
+    IForgeResponseCache diskCache,
     IOptions<ForgeApiOptions> options,
     ILogger<ForgeApiService> logger
 ) : IForgeApiService
@@ -57,7 +58,8 @@ public sealed partial class ForgeApiService(
 
     /// <summary>
     /// Issues a rate-limited GET request and returns its status code and body. Successful (2xx) and NotFound (404)
-    /// responses are cached by URL; server errors are not cached.
+    /// responses are cached by URL, in memory for this run and on disk for later runs; errors (including 429) are
+    /// never cached.
     /// </summary>
     /// <param name="url">The request URL, which doubles as the cache key.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
@@ -67,6 +69,14 @@ public sealed partial class ForgeApiService(
         {
             logger.LogDebug("Cache hit: GET {Url}", url);
             return cached;
+        }
+
+        if (diskCache.TryGet(url, out var diskStatus, out var diskBody))
+        {
+            logger.LogDebug("Disk cache hit: GET {Url}", url);
+            var fromDisk = new CachedResponse((HttpStatusCode)diskStatus, diskBody);
+            cache.Set(url, fromDisk, _cacheEntryOptions);
+            return fromDisk;
         }
 
         logger.LogDebug("API Request: GET {Url}", url);
@@ -83,9 +93,45 @@ public sealed partial class ForgeApiService(
         if (result.IsSuccessStatusCode || statusCode == HttpStatusCode.NotFound)
         {
             cache.Set(url, result, _cacheEntryOptions);
+            diskCache.Set(url, (int)statusCode, body);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Reads a dependencies response. Forge now returns <c>data</c> as an object keyed by <c>"modId:version"</c>
+    /// (each value a list of dependencies); older responses used a flat list. Both are accepted, and the per-mod lists
+    /// are flattened. Returns null when the response isn't a successful one.
+    /// </summary>
+    internal static List<ModDependency>? ParseDependencies(string body)
+    {
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        if (!root.TryGetProperty("success", out var success) || success.ValueKind != JsonValueKind.True)
+        {
+            return null;
+        }
+
+        if (!root.TryGetProperty("data", out var data))
+        {
+            return null;
+        }
+
+        return data.ValueKind switch
+        {
+            JsonValueKind.Array => data.Deserialize<List<ModDependency>>(_jsonOptions) ?? [],
+            JsonValueKind.Object => data
+                .EnumerateObject()
+                .SelectMany(entry =>
+                    entry.Value.ValueKind == JsonValueKind.Array
+                        ? entry.Value.Deserialize<List<ModDependency>>(_jsonOptions) ?? []
+                        : []
+                )
+                .ToList(),
+            _ => null,
+        };
     }
 
     /// <summary>
@@ -363,7 +409,7 @@ public sealed partial class ForgeApiService(
             }
 
             var hasCompatibleVersion = result.Versions.Any(v =>
-                SemVer.SatisfiesRange(v.SptVersionConstraint, sptVersion)
+                SemVer.SupportsSpt(v.SptVersionConstraint, sptVersion)
             );
 
             // No published version targets the requested SPT version; return the matched mod as incompatible.
@@ -560,6 +606,7 @@ public sealed partial class ForgeApiService(
     /// <returns>Flattened dependency tree with recursive structure or an error.</returns>
     public async Task<OneOf<List<ModDependency>, NotFound, ApiError>> GetModDependenciesAsync(
         IEnumerable<(string Identifier, string Version)> modVersions,
+        SemanticVersioning.Version? sptVersion,
         CancellationToken cancellationToken = default
     )
     {
@@ -577,7 +624,10 @@ public sealed partial class ForgeApiService(
                 modList.Select(m => $"{Uri.EscapeDataString(m.Identifier)}:{Uri.EscapeDataString(m.Version)}")
             );
 
-            var url = $"{_options.BaseUrl}mods/dependencies?mods={modsParam}";
+            // Forge requires spt_version alongside mods; without it every request is rejected with HTTP 400.
+            var url = sptVersion is null
+                ? $"{_options.BaseUrl}mods/dependencies?mods={modsParam}"
+                : $"{_options.BaseUrl}mods/dependencies?mods={modsParam}&spt_version={sptVersion}";
 
             var response = await GetJsonAsync(url, cancellationToken);
 
@@ -586,14 +636,8 @@ public sealed partial class ForgeApiService(
                 return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
             }
 
-            var apiResponse = JsonSerializer.Deserialize<ModDependenciesApiResponse>(response.Body, _jsonOptions);
-
-            if (apiResponse?.Success != true || apiResponse.Data is null)
-            {
-                return new NotFound();
-            }
-
-            return apiResponse.Data;
+            var dependencies = ParseDependencies(response.Body);
+            return dependencies is null ? new NotFound() : dependencies;
         }
         catch (HttpRequestException ex)
         {

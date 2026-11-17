@@ -1,4 +1,4 @@
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// How a dependency required by a proposed update relates to what's currently installed.

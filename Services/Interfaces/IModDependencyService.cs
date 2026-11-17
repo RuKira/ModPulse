@@ -1,6 +1,6 @@
-using CheckMods.Models;
+using ModPulse.Models;
 
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Service responsible for analyzing mod dependencies and building a dependency tree.
@@ -12,12 +12,14 @@ public interface IModDependencyService
     /// </summary>
     /// <param name="mods">The mods to analyze dependencies for.</param>
     /// <param name="installedModGuids">Set of GUIDs for mods that are currently installed.</param>
+    /// <param name="sptVersion">The installed SPT version (sent to Forge with each dependency lookup).</param>
     /// <param name="progressCallback">Optional callback for progress updates (current, total).</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>Dependency analysis result containing tree structure and any issues.</returns>
     Task<DependencyAnalysisResult> AnalyzeDependenciesAsync(
         IEnumerable<Mod> mods,
         HashSet<string> installedModGuids,
+        SemanticVersioning.Version? sptVersion = null,
         Action<int, int>? progressCallback = null,
         CancellationToken cancellationToken = default
     );

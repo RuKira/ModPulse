@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Response from the Forge API SPT versions endpoint.

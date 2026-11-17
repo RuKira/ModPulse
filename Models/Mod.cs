@@ -1,4 +1,4 @@
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Master record representing a mod throughout the entire processing lifecycle.
@@ -86,6 +86,11 @@ public sealed class Mod
     /// </summary>
     public string? LatestVersion { get; private set; }
 
+    /// <summary>
+    /// SPT versions Forge lists for <see cref="LatestVersion"/> when it was offered as an update.
+    /// </summary>
+    public IReadOnlyList<string>? LatestVersionSptVersions { get; private set; }
+
     public UpdateStatus UpdateStatus { get; private set; } = UpdateStatus.Unknown;
 
     /// <summary>
@@ -135,6 +140,17 @@ public sealed class Mod
     #region Processing State
 
     public ModStatus Status { get; private set; } = ModStatus.NoMatch;
+
+    /// <summary>
+    /// True when installed on a legacy SPT version (below 3.11). Legacy mods are assumed to match the installed SPT
+    /// version and are only offered updates confirmed for that same version.
+    /// </summary>
+    public bool IsLegacy { get; private set; }
+
+    /// <summary>
+    /// For legacy mods: why an available update was withheld, if one was.
+    /// </summary>
+    public string? LegacyNote { get; private set; }
 
     public List<string> LoadWarnings { get; init; } = [];
 
@@ -204,6 +220,7 @@ public sealed class Mod
     public void UpdateFromSafeToUpdate(SafeToUpdateMod update)
     {
         LatestVersion = update.RecommendedVersion?.Version;
+        LatestVersionSptVersions = update.RecommendedVersion?.SptVersions?.AsReadOnly();
         DownloadLink = update.RecommendedVersion?.Link;
         UpdateStatus = UpdateStatus.UpdateAvailable;
     }
@@ -238,6 +255,28 @@ public sealed class Mod
     {
         IncompatibilityReason = incompatible.Reason;
         UpdateStatus = UpdateStatus.Incompatible;
+    }
+
+    /// <summary>
+    /// Labels the mod as installed on a legacy SPT version.
+    /// </summary>
+    public void MarkLegacy()
+    {
+        IsLegacy = true;
+    }
+
+    /// <summary>
+    /// Keeps the mod on its installed version: shown as up to date with no download, optionally with a note.
+    /// </summary>
+    /// <param name="note">Why an available update was withheld, or null.</param>
+    public void KeepInstalledVersion(string? note)
+    {
+        UpdateStatus = UpdateStatus.UpToDate;
+        LatestVersion = LocalVersion;
+        LatestVersionSptVersions = null;
+        DownloadLink = null;
+        IncompatibilityReason = null;
+        LegacyNote = note;
     }
 
     /// <summary>

@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace CheckMods.Utils;
+namespace ModPulse.Utils;
 
 /// <summary>
 /// Provides the running application's version information, read from assembly metadata embedded at build time.

@@ -1,6 +1,6 @@
-using CheckMods.Models;
+using ModPulse.Models;
 
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Interface for the main application orchestration service.

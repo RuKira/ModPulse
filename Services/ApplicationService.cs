@@ -1,11 +1,11 @@
-using CheckMods.Configuration;
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Configuration;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Microsoft.Extensions.Logging;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Main application service that orchestrates the SPT mod checking workflow.
@@ -38,9 +38,6 @@ public sealed class ApplicationService(
 
         try
         {
-            // Remove any legacy API key file from previous versions.
-            RemoveLegacyApiKeyFile();
-
             logger.LogDebug("Validating SPT path");
             var sptPath = GetValidatedSptPath(args);
             if (sptPath is null)
@@ -62,8 +59,8 @@ public sealed class ApplicationService(
             logger.LogInformation("SPT version validated: {SptVersion}", sptVersion);
 
             // Must run after the SPT update check.
-            logger.LogDebug("Checking for Check Mods updates");
-            await CheckForCheckModsUpdateAsync(sptVersion, cancellationToken);
+            logger.LogDebug("Checking for ModPulse updates");
+            await CheckForModPulseUpdateAsync(sptVersion, cancellationToken);
 
             // Offer to refresh the local ignore list from the author-maintained remote list (opt-in, default no).
             logger.LogDebug("Offering remote ignore list refresh");
@@ -105,6 +102,12 @@ public sealed class ApplicationService(
             logger.LogDebug("Enriching mods with version data");
             await EnrichModsWithVersionDataAsync(mods, sptVersion, cancellationToken);
 
+            // Legacy SPT (below 3.11): label mods, trust installed versions, and drop updates aimed at a newer SPT.
+            if (SptLayout.IsLegacy(sptVersion))
+            {
+                ApplyLegacyPolicy(mods, sptVersion);
+            }
+
             logger.LogDebug("Applying ignored updates");
             ApplyIgnoredUpdates(mods);
 
@@ -113,7 +116,7 @@ public sealed class ApplicationService(
             CheckModVersionCompatibility(mods, sptVersion);
 
             logger.LogDebug("Checking mod dependencies");
-            await CheckModDependenciesAsync(mods, cancellationToken);
+            await CheckModDependenciesAsync(mods, sptVersion, cancellationToken);
 
             logger.LogDebug("Displaying results");
             reporter.VersionTable(mods);
@@ -170,6 +173,22 @@ public sealed class ApplicationService(
     }
 
     /// <summary>
+    /// Applies the legacy rules (see <see cref="LegacyModPolicy"/>) and reports any withheld updates.
+    /// </summary>
+    private void ApplyLegacyPolicy(List<Mod> mods, SemanticVersioning.Version sptVersion)
+    {
+        var withheld = LegacyModPolicy.ApplyAll(mods, sptVersion);
+        logger.LogInformation("Legacy SPT {SptVersion}: withheld {Count} update(s) targeting a newer SPT", sptVersion, withheld);
+
+        if (withheld > 0)
+        {
+            reporter.Status(
+                $"Legacy SPT {sptVersion}: kept {withheld} mod(s) on their installed version because newer releases target a newer SPT."
+            );
+        }
+    }
+
+    /// <summary>
     /// Flags any mod whose available update matches a stored suppression so it renders as ignored (treated as up to
     /// date).
     /// </summary>
@@ -194,28 +213,42 @@ public sealed class ApplicationService(
     {
         reporter.Heading("Validating SPT installation...");
 
+        string path;
         if (args.Length == 0)
         {
-            var currentPath = Directory.GetCurrentDirectory();
-            reporter.UsingPath(currentPath);
-            return currentPath;
+            path = Directory.GetCurrentDirectory();
         }
-
-        var safePath = SecurityHelper.GetSafePath(args[0]);
-        if (safePath is null)
+        else
         {
-            reporter.Error("Error: Invalid path provided.");
-            return null;
+            var safePath = SecurityHelper.GetSafePath(args[0]);
+            if (safePath is null)
+            {
+                reporter.Error("Error: Invalid path provided.");
+                return null;
+            }
+
+            if (!Directory.Exists(safePath))
+            {
+                reporter.DirectoryDoesNotExist(safePath);
+                return null;
+            }
+
+            path = safePath;
         }
 
-        if (!Directory.Exists(safePath))
+        // Accept either the game root or the 4.x server folder; everything downstream works from the game root.
+        var installation = SptLayout.Resolve(path);
+        if (installation is not null)
         {
-            reporter.DirectoryDoesNotExist(safePath);
-            return null;
+            path = installation.GameRoot;
+            if (!string.Equals(installation.ServerRoot, installation.GameRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                reporter.Status($"Found SPT server folder: {Path.GetFileName(installation.ServerRoot)}");
+            }
         }
 
-        reporter.UsingPath(safePath);
-        return safePath;
+        reporter.UsingPath(path);
+        return path;
     }
 
     /// <summary>
@@ -271,18 +304,18 @@ public sealed class ApplicationService(
     }
 
     /// <summary>
-    /// Checks whether a newer version of Check Mods is available on the Forge and displays the result.
+    /// Checks whether a newer version of ModPulse is published on GitHub and displays the result.
     /// </summary>
     /// <param name="sptVersion">The installed SPT version, used for compatibility filtering.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
-    private async Task CheckForCheckModsUpdateAsync(
+    private async Task CheckForModPulseUpdateAsync(
         SemanticVersioning.Version sptVersion,
         CancellationToken cancellationToken = default
     )
     {
-        reporter.Heading("Checking for Check Mods updates...");
+        reporter.Heading("Checking for ModPulse updates...");
 
-        CheckModsUpdateResult result;
+        ModPulseUpdateResult result;
         try
         {
             result = await updateCheckService.CheckAsync(sptVersion, cancellationToken);
@@ -293,14 +326,14 @@ public sealed class ApplicationService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Check Mods update check failed unexpectedly");
-            reporter.Status("Could not check for Check Mods updates.");
+            logger.LogWarning(ex, "ModPulse update check failed unexpectedly");
+            reporter.Status("Could not check for ModPulse updates.");
             reporter.Blank();
             reporter.Rule();
             return;
         }
 
-        reporter.CheckModsUpdate(result, sptVersion);
+        reporter.ModPulseUpdate(result, sptVersion);
     }
 
     /// <summary>
@@ -567,6 +600,7 @@ public sealed class ApplicationService(
 
         // If no exact match, try fuzzy match with high threshold
         var bestMatch = searchResults
+            .Where(r => !ForgeMatchGuard.IsDifferentMod(mod, r))
             .Select(r => (Result: r, Score: ModNameNormalizer.GetFuzzyMatchScore(mod.LocalName, r.Name)))
             .Where(x => x.Score >= MatchingConstants.NameSearchFuzzyThreshold)
             .OrderByDescending(x => x.Score)
@@ -644,7 +678,10 @@ public sealed class ApplicationService(
 
         // Only check mods that are matched with the API and have versions stored, skipping those whose update was
         // dismissed as a false positive.
-        var matchedMods = mods.Where(m => m.IsMatched && m.ApiVersions is { Count: > 0 } && !m.UpdateSuppressed)
+        // Legacy mods are assumed to match the installed SPT version, so they're never flagged here.
+        var matchedMods = mods.Where(m =>
+                m.IsMatched && m.ApiVersions is { Count: > 0 } && !m.UpdateSuppressed && !m.IsLegacy
+            )
             .ToList();
 
         foreach (var mod in matchedMods)
@@ -689,7 +726,7 @@ public sealed class ApplicationService(
             return;
         }
 
-        if (!SemanticVersioning.Range.TryParse(installedApiVersion.SptVersionConstraint, out var range))
+        if (!SemanticVersioning.Range.TryParse(installedApiVersion.SptVersionConstraint, out _))
         {
             // The constraint from Forge can't be parsed; surface a warning.
             reporter.Warning(
@@ -698,9 +735,9 @@ public sealed class ApplicationService(
             return;
         }
 
-        if (range.IsSatisfied(sptVersion))
+        if (SemVer.SupportsSpt(installedApiVersion.SptVersionConstraint, sptVersion))
         {
-            // The installed version is compatible - no issue
+            // The installed version is compatible (including a build for an older patch of the same minor).
             return;
         }
 
@@ -709,7 +746,7 @@ public sealed class ApplicationService(
 
         // Find the latest compatible version to suggest
         var compatibleApiVersion = mod.ApiVersions!.Where(v =>
-                SemVer.SatisfiesRange(v.SptVersionConstraint, sptVersion)
+                SemVer.SupportsSpt(v.SptVersionConstraint, sptVersion)
             )
             .OrderByDescending(v => SemVer.ParseOrZero(v.Version))
             .FirstOrDefault();
@@ -722,7 +759,11 @@ public sealed class ApplicationService(
     /// </summary>
     /// <param name="mods">Mods to check dependencies for.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
-    private async Task CheckModDependenciesAsync(List<Mod> mods, CancellationToken cancellationToken = default)
+    private async Task CheckModDependenciesAsync(
+        List<Mod> mods,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken = default
+    )
     {
         if (!mods.Any(m => m.IsMatched))
         {
@@ -759,41 +800,12 @@ public sealed class ApplicationService(
                 modDependencyService.AnalyzeDependenciesAsync(
                     mods,
                     installedGuids,
+                    sptVersion,
                     (current, _) => setValue(current),
                     cancellationToken
                 )
         );
 
         reporter.DependencyResults(result);
-    }
-
-    /// <summary>
-    /// Removes the legacy API key file written by previous versions. Best-effort: any failure is logged and ignored.
-    /// </summary>
-    private void RemoveLegacyApiKeyFile()
-    {
-        try
-        {
-            var appDataFolder = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var configDirectory = Path.GetFullPath(Path.Combine(appDataFolder, "SptCheckMods"));
-            var configFilePath = Path.GetFullPath(Path.Combine(configDirectory, "apikey.txt"));
-
-            if (!configFilePath.StartsWith(configDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            if (!File.Exists(configFilePath))
-            {
-                return;
-            }
-
-            File.Delete(configFilePath);
-            logger.LogInformation("Removed legacy API key file.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to remove legacy API key file");
-        }
     }
 }

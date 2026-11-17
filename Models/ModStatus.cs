@@ -1,4 +1,4 @@
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Represents the various states a mod can be in after processing.

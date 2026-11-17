@@ -1,15 +1,15 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.Loader;
-using CheckMods.Configuration;
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Configuration;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Unified service for scanning both server and client mods from disk. Returns unified Mod objects with validation warnings.
@@ -28,17 +28,17 @@ public sealed class ModScannerService(
     {
         logger.LogDebug("Scanning server mods at: {SptPath}", sptPath);
 
-        var modsDir = Path.Combine(sptPath, "SPT", "user", "mods");
         List<Mod> mods = [];
 
-        if (!Directory.Exists(modsDir))
+        var installation = SptLayout.Resolve(sptPath);
+        if (installation is null || !Directory.Exists(installation.ServerModsDirectory))
         {
-            logger.LogDebug("Server mods directory not found: {ModsDir}", modsDir);
+            logger.LogDebug("Server mods directory not found for: {SptPath}", sptPath);
             reporter.Status("Scanning server mods... none found.");
             return mods;
         }
 
-        var modDirs = Directory.GetDirectories(modsDir);
+        var modDirs = Directory.GetDirectories(installation.ServerModsDirectory);
         logger.LogDebug("Found {DirCount} mod directories", modDirs.Length);
         reporter.Blank();
         reporter.Status($"Scanning {modDirs.Length} mod directories for server mods...");
@@ -47,31 +47,134 @@ public sealed class ModScannerService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var dllFiles = Directory.GetFiles(modDir, "*.dll", SearchOption.TopDirectoryOnly);
+            var mod = installation.Kind == SptServerKind.Node
+                ? ScanNodeServerModDirectory(modDir, installation.ServerRoot)
+                : ScanDotNetServerModDirectory(modDir, installation.ServerRoot);
 
-            foreach (var dllPath in dllFiles)
+            if (mod is not null)
             {
-                try
-                {
-                    var mod = ExtractServerModMetadata(dllPath, sptPath);
-                    if (mod is null)
-                    {
-                        continue;
-                    }
-
-                    mods.Add(mod);
-                    break; // Only one mod per directory
-                }
-                catch (Exception ex)
-                {
-                    reporter.CouldNotReadModDll(Path.GetFileName(dllPath), ex.Message);
-                }
+                mods.Add(mod);
             }
         }
 
         logger.LogInformation("Found {ModCount} server mods", mods.Count);
         reporter.Status($"Found {mods.Count} server mods.");
         return mods;
+    }
+
+    /// <summary>
+    /// SPT 3.x: a server mod is a folder with a package.json. DLLs inside it (node_modules, bundled tools) are never
+    /// server mods. A 4.x-style DLL mod without a package.json is reported, since a 3.x server can't load it.
+    /// </summary>
+    private Mod? ScanNodeServerModDirectory(string modDir, string serverRoot)
+    {
+        var packageMod = ReadPackageJsonMod(modDir);
+        if (packageMod is not null)
+        {
+            return packageMod;
+        }
+
+        var dllMod = ScanDotNetServerModDirectory(modDir, serverRoot);
+        dllMod?.LoadWarnings.Add("SPT 4.x (C#) server mod in an SPT 3.x install. SPT 3.x can't load it.");
+        return dllMod;
+    }
+
+    /// <summary>
+    /// SPT 4.x: a server mod is a DLL carrying mod metadata (one mod per folder). A leftover 3.x package.json mod is
+    /// reported, since a 4.x server can't load it.
+    /// </summary>
+    private Mod? ScanDotNetServerModDirectory(string modDir, string serverRoot)
+    {
+        foreach (var dllPath in Directory.GetFiles(modDir, "*.dll", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                var mod = ExtractServerModMetadata(dllPath, serverRoot);
+                if (mod is not null)
+                {
+                    return mod; // Only one mod per directory
+                }
+            }
+            catch (Exception ex)
+            {
+                reporter.CouldNotReadModDll(Path.GetFileName(dllPath), ex.Message);
+            }
+        }
+
+        if (SptLayout.DetectKind(serverRoot) != SptServerKind.DotNet)
+        {
+            return null;
+        }
+
+        var legacyMod = ReadPackageJsonMod(modDir);
+        legacyMod?.LoadWarnings.Add("SPT 3.x (TypeScript) server mod in an SPT 4.x install. SPT 4.x can't load it.");
+        return legacyMod;
+    }
+
+    /// <summary>
+    /// Reads an SPT 3.x server mod from its package.json (name, author, version, and the sptVersion/akiVersion
+    /// range). The package name doubles as the GUID, which is how 3.x mods are listed on the Forge.
+    /// </summary>
+    private Mod? ReadPackageJsonMod(string modDir)
+    {
+        var packagePath = Path.Combine(modDir, "package.json");
+        if (!File.Exists(packagePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                File.ReadAllText(packagePath),
+                new System.Text.Json.JsonDocumentOptions
+                {
+                    CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+                    AllowTrailingCommas = true,
+                }
+            );
+            var root = doc.RootElement;
+
+            string? Text(string key)
+            {
+                if (!root.TryGetProperty(key, out var value))
+                {
+                    return null;
+                }
+
+                return value.ValueKind switch
+                {
+                    System.Text.Json.JsonValueKind.String => value.GetString(),
+                    System.Text.Json.JsonValueKind.Number => value.GetRawText(),
+                    // "author" is sometimes an object: { "name": "..." }
+                    System.Text.Json.JsonValueKind.Object when value.TryGetProperty("name", out var n) => n.GetString(),
+                    _ => null,
+                };
+            }
+
+            var name = Text("name") ?? Path.GetFileName(modDir);
+            var author = Text("author") ?? string.Empty;
+            var version = Text("version") ?? string.Empty;
+            var sptVersion = Text("sptVersion") ?? Text("akiVersion");
+
+            return new Mod
+            {
+                Guid = name,
+                FilePath = packagePath,
+                IsServerMod = true,
+                LocalName = name,
+                LocalAuthor = author,
+                LocalVersion = version,
+                LocalSptVersion = sptVersion,
+                LoadWarnings = ValidateModMetadata(name, author, version, name),
+            };
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+        {
+            logger.LogDebug(ex, "Could not read package.json: {Path}", packagePath);
+            reporter.CouldNotReadModDll(Path.GetFileName(packagePath), ex.Message);
+            return null;
+        }
     }
 
     /// <inheritdoc />
@@ -488,17 +591,21 @@ public sealed class ModScannerService(
     /// <inheritdoc />
     public string? GetSptVersion(string sptPath)
     {
-        var coreDllPath = Path.Combine(sptPath, "SPT", "SPTarkov.Server.Core.dll");
-
-        if (!File.Exists(coreDllPath))
+        var installation = SptLayout.Resolve(sptPath);
+        if (installation is null)
         {
             return null;
         }
 
         try
         {
-            var versionInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(coreDllPath);
-            return versionInfo.FileVersion;
+            var reading = SptLayout.ReadVersion(installation.ServerRoot);
+            if (reading is not null)
+            {
+                logger.LogDebug("SPT version {Version} read from {Source}", reading.Version, reading.Source);
+            }
+
+            return reading?.Version;
         }
         catch (Exception ex)
         {
@@ -515,9 +622,12 @@ public sealed class ModScannerService(
     {
         List<MisplacedMod> wrongFolder = [];
 
-        // Client mods incorrectly placed in the server folder (SPT/user/mods). Scans recursively, including DLLs
+        var installation = SptLayout.Resolve(sptPath);
+        var serverRoot = installation?.ServerRoot ?? sptPath;
+
+        // Client mods incorrectly placed in the server folder (<server>/user/mods). Scans recursively, including DLLs
         // loose in the mods root and nested in subfolders.
-        var serverModsDir = Path.Combine(sptPath, "SPT", "user", "mods");
+        var serverModsDir = Path.Combine(serverRoot, "user", "mods");
         if (Directory.Exists(serverModsDir))
         {
             foreach (var dllPath in Directory.GetFiles(serverModsDir, "*.dll", SearchOption.AllDirectories))
@@ -543,7 +653,7 @@ public sealed class ModScannerService(
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var serverMod = TryDetectServerMod(dllPath, sptPath);
+                var serverMod = TryDetectServerMod(dllPath, serverRoot);
                 if (serverMod is not null)
                 {
                     wrongFolder.Add(
@@ -739,11 +849,11 @@ public sealed class ModScannerService(
     /// Attempts to read the DLL as a server (SPT) mod. Returns the mod if SPT mod metadata is found, otherwise null.
     /// All load failures are swallowed.
     /// </summary>
-    private Mod? TryDetectServerMod(string dllPath, string sptPath)
+    private Mod? TryDetectServerMod(string dllPath, string serverRoot)
     {
         try
         {
-            return ExtractServerModMetadata(dllPath, sptPath);
+            return ExtractServerModMetadata(dllPath, serverRoot);
         }
         catch (Exception ex)
         {
@@ -757,9 +867,9 @@ public sealed class ModScannerService(
 
     #region Server Mod Extraction
 
-    private Mod? ExtractServerModMetadata(string dllPath, string sptDirectory)
+    private Mod? ExtractServerModMetadata(string dllPath, string serverRoot)
     {
-        var loadContext = new SptAssemblyLoadContext(sptDirectory);
+        var loadContext = new SptAssemblyLoadContext(serverRoot);
 
         try
         {
@@ -809,8 +919,10 @@ public sealed class ModScannerService(
 
     private static object? LoadSptMetadataFromAssembly(Assembly assembly)
     {
-        var types = GetLoadableTypes(assembly);
-        var metadataType = types.FirstOrDefault(t => t.BaseType?.Name == "AbstractModMetadata" && !t.IsAbstract);
+        // SPT 4.0 mods subclass the abstract record AbstractModMetadata. SPT 4.1 mods implement the IModMetadata
+        // interface instead (typically a sealed record), so look for either.
+        var metadataType = GetLoadableTypes(assembly)
+            .FirstOrDefault(t => !t.IsAbstract && !t.IsInterface && (InheritsAbstractModMetadata(t) || ImplementsIModMetadata(t)));
 
         if (metadataType is null)
         {
@@ -818,6 +930,44 @@ public sealed class ModScannerService(
         }
 
         return Activator.CreateInstance(metadataType);
+    }
+
+    private static bool InheritsAbstractModMetadata(Type type)
+    {
+        for (var current = type.BaseType; current is not null; current = SafeBaseType(current))
+        {
+            if (current.Name == "AbstractModMetadata")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ImplementsIModMetadata(Type type)
+    {
+        try
+        {
+            return type.GetInterfaces().Any(i => i.Name == "IModMetadata");
+        }
+        catch (Exception)
+        {
+            // An interface lives in an assembly that couldn't be resolved; not a mod we can read.
+            return false;
+        }
+    }
+
+    private static Type? SafeBaseType(Type type)
+    {
+        try
+        {
+            return type.BaseType;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -873,14 +1023,15 @@ public sealed class ModScannerService(
     }
 
     /// <summary>
-    /// Custom AssemblyLoadContext that resolves SPT assemblies from the SPT directory.
+    /// Custom AssemblyLoadContext that resolves SPT assemblies from the SPT server folder (SPT/ on 4.0,
+    /// SPT_Runtime/ on 4.1).
     /// </summary>
-    private sealed class SptAssemblyLoadContext(string sptDirectory) : AssemblyLoadContext(true)
+    private sealed class SptAssemblyLoadContext(string serverRoot) : AssemblyLoadContext(true)
     {
         protected override Assembly? Load(AssemblyName assemblyName)
         {
-            // Try to find the assembly in the SPT directory
-            var sptPath = Path.Combine(sptDirectory, "SPT", $"{assemblyName.Name}.dll");
+            // Try to find the assembly in the SPT server folder
+            var sptPath = Path.Combine(serverRoot, $"{assemblyName.Name}.dll");
             if (File.Exists(sptPath))
             {
                 using var stream = new MemoryStream(File.ReadAllBytes(sptPath));
@@ -897,7 +1048,9 @@ public sealed class ModScannerService(
 
     private List<string> GetValidClientDllFiles(string pluginsPath)
     {
-        var sptDir = Path.Combine(pluginsPath, "spt");
+        // Skip SPT's own plugins/spt folder. Match the folder exactly (with a trailing separator) so mods whose folder
+        // merely starts with "spt" (e.g. "SPT-Leaderboard") are still scanned.
+        var sptDir = Path.Combine(pluginsPath, "spt") + Path.DirectorySeparatorChar;
 
         return Directory
             .GetFiles(pluginsPath, "*.dll", SearchOption.AllDirectories)

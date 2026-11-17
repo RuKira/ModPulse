@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "ignored": [
+    {
+      "apiModId": 2246,
+      "name": "WTT- Armory",
+      "guid": "com.wtt.armory",
+      "localVersion": "2.0.5",
+      "ignoredLatestVersion": "3.0.0"
+    },
+    {
+      "apiModId": 1089,
+      "name": "Kaeno-TraderScrolling",
+      "guid": "com.kaeno.traderscrolling",
+      "localVersion": "4.0.0",
+      "ignoredLatestVersion": "4.1.0"
+    }
+  ]
+}

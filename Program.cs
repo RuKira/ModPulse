@@ -1,17 +1,17 @@
-using CheckMods.Configuration;
-using CheckMods.Extensions;
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Configuration;
+using ModPulse.Extensions;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Spectre.Console;
 
-namespace CheckMods;
+namespace ModPulse;
 
 /// <summary>
-/// Main entry point for the CheckMods application.
+/// Main entry point for the ModPulse application.
 /// </summary>
 public class Program
 {
@@ -21,7 +21,10 @@ public class Program
     /// <summary>
     /// Sets up dependency injection, runs the application, and handles any unhandled exceptions.
     /// </summary>
-    /// <param name="args">Command line arguments. The only argument is the SPT installation path.</param>
+    /// <param name="args">
+    /// Command line arguments: the SPT installation path (optional; defaults to the current folder), plus
+    /// <c>--refresh</c> to ignore cached Forge responses for this run.
+    /// </param>
     public static async Task Main(string[] args)
     {
         ILogger<Program>? logger = null;
@@ -37,14 +40,19 @@ public class Program
         IIgnoredUpdateWorkflow? ignoredUpdateWorkflow = null;
         IReadOnlyList<Mod>? mods = null;
 
+        // Flags are handled here; the remaining argument (if any) is the SPT path.
+        var refreshCache = args.Any(a => string.Equals(a, "--refresh", StringComparison.OrdinalIgnoreCase));
+        args = args.Where(a => !a.StartsWith("--", StringComparison.Ordinal)).ToArray();
+
         try
         {
             var services = new ServiceCollection();
-            services.AddCheckModsServices();
+            services.AddModPulseServices();
+            services.Configure<ForgeCacheOptions>(o => o.Refresh = refreshCache);
             serviceProvider = services.BuildServiceProvider();
 
             logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-            logger.LogInformation("CheckMods application starting. Args: {Args}", string.Join(", ", args));
+            logger.LogInformation("ModPulse application starting. Args: {Args}", string.Join(", ", args));
 
             logFilePath = serviceProvider.GetRequiredService<IOptions<LoggingOptions>>().Value.LogFilePath;
 
@@ -53,7 +61,7 @@ public class Program
 
             mods = await applicationService.RunAsync(args, _cts.Token);
 
-            logger.LogInformation("CheckMods application completed successfully");
+            logger.LogInformation("ModPulse application completed successfully");
         }
         catch (OperationCanceledException)
         {
@@ -72,7 +80,7 @@ public class Program
 
             AnsiConsole.WriteLine();
 
-            AnsiConsole.MarkupLine($"[grey]Check Mods v{VersionInfo.SemVer} (build {VersionInfo.GitHash})[/]");
+            AnsiConsole.MarkupLine($"[grey]ModPulse v{VersionInfo.SemVer} (build {VersionInfo.GitHash})[/]");
             AnsiConsole.MarkupLine($"[grey]Log file: {logFilePath}[/]");
 
             if (!_wasCancelled && !Console.IsInputRedirected)

@@ -1,0 +1,25 @@
+name: Report version mismatches
+description: Suggest entries for the community ignore list (a mod whose DLL reports a different version than its Forge release).
+title: "[Ignore list] "
+labels: ["ignore-list"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ModPulse fills this in when you choose to report dismissed updates. Each entry means: the installed DLL reports
+        `localVersion`, but it is actually the Forge release `ignoredLatestVersion`.
+  - type: textarea
+    id: ignored_versions
+    attributes:
+      label: Entries
+      description: JSON entries pre-filled by ModPulse.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything that helps confirm the mismatch (e.g. where you downloaded the mod).
+    validations:
+      required: false

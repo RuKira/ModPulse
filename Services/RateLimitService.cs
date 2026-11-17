@@ -1,12 +1,12 @@
 using System.Net;
 using System.Threading.RateLimiting;
-using CheckMods.Configuration;
-using CheckMods.Services.Interfaces;
+using ModPulse.Configuration;
+using ModPulse.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Service that provides rate limiting for API calls. Proactively paces requests beneath the Forge API's two

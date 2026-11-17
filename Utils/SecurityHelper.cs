@@ -1,4 +1,4 @@
-namespace CheckMods.Utils;
+namespace ModPulse.Utils;
 
 /// <summary>
 /// Path validation utilities that prevent directory traversal.

@@ -1,6 +1,6 @@
-using CheckMods.Models;
+using ModPulse.Models;
 
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Scans and loads mods from disk, returning unified Mod objects with validation warnings.

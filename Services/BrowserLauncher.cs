@@ -1,9 +1,9 @@
 using System.Diagnostics;
-using CheckMods.Services.Interfaces;
+using ModPulse.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Default <see cref="IBrowserLauncher"/>. Opens URLs via the OS shell.

@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using System.Text;
-using CheckMods.Configuration;
+using ModPulse.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace CheckMods.Logging;
+namespace ModPulse.Logging;
 
 /// <summary>
 /// A simple file logger that writes log messages to a file with rotation support.
@@ -266,7 +266,7 @@ public sealed class FileLoggerProvider(IOptions<LoggingOptions> options) : ILogg
         var banner = new StringBuilder();
         banner.AppendLine();
         banner.AppendLine("================================================================================");
-        banner.AppendLine($"  CheckMods Session Started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        banner.AppendLine($"  ModPulse Session Started: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         banner.AppendLine("================================================================================");
         banner.AppendLine();
 

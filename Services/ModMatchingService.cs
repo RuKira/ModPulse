@@ -1,11 +1,11 @@
-using CheckMods.Configuration;
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Configuration;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Microsoft.Extensions.Logging;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Service responsible for matching local mods with their Forge API counterparts.
@@ -250,6 +250,15 @@ public sealed class ModMatchingService(IForgeApiService forgeApiService, ILogger
     /// </summary>
     private static ModSearchResult? FindBestMatch(Mod mod, List<ModSearchResult> searchResults)
     {
+        // 0. The Forge GUID is the parent of the local GUID (the local DLL is one component of that mod).
+        foreach (var result in searchResults)
+        {
+            if (ForgeMatchGuard.IsComponentOf(mod, result))
+            {
+                return result;
+            }
+        }
+
         // 1. Try exact normalized name match
         foreach (var result in searchResults)
         {
@@ -314,8 +323,9 @@ public sealed class ModMatchingService(IForgeApiService forgeApiService, ILogger
             }
         }
 
-        // 5. Try fuzzy matching with minimum threshold
+        // 5. Try fuzzy matching with minimum threshold, skipping listings that clearly belong to another author.
         var bestFuzzyMatch = searchResults
+            .Where(r => !ForgeMatchGuard.IsDifferentMod(mod, r))
             .Select(r => new
             {
                 Result = r,

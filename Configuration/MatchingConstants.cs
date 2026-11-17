@@ -1,4 +1,4 @@
-namespace CheckMods.Configuration;
+namespace ModPulse.Configuration;
 
 /// <summary>
 /// Constants used for mod matching operations.

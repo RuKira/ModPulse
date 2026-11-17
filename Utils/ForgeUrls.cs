@@ -1,4 +1,4 @@
-namespace CheckMods.Utils;
+namespace ModPulse.Utils;
 
 /// <summary>
 /// Builds Forge website URLs for mod detail pages and downloads.

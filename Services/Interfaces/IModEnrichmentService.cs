@@ -1,6 +1,6 @@
-using CheckMods.Models;
+using ModPulse.Models;
 
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Service responsible for enriching matched mods with additional API data such as version information.

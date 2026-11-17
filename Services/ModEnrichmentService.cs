@@ -1,9 +1,9 @@
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Service responsible for enriching matched mods with additional API data such as version information.

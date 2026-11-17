@@ -1,15 +1,15 @@
 using System.Net.Http.Headers;
 using System.Reflection;
-using CheckMods.Configuration;
-using CheckMods.Logging;
-using CheckMods.Services;
-using CheckMods.Services.Interfaces;
+using ModPulse.Configuration;
+using ModPulse.Logging;
+using ModPulse.Services;
+using ModPulse.Services.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SPTarkov.DI;
 
-namespace CheckMods.Extensions;
+namespace ModPulse.Extensions;
 
 /// <summary>
 /// Extension methods for configuring dependency injection services.
@@ -17,17 +17,17 @@ namespace CheckMods.Extensions;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers all CheckMods services with the dependency injection container.
+    /// Registers all ModPulse services with the dependency injection container.
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
-    public static IServiceCollection AddCheckModsServices(this IServiceCollection services)
+    public static IServiceCollection AddModPulseServices(this IServiceCollection services)
     {
         services.Configure<ForgeApiOptions>(_ => { });
         services.Configure<RateLimitOptions>(_ => { });
         services.Configure<ModScannerOptions>(_ => { });
         services.Configure<LoggingOptions>(_ => { });
-        services.Configure<UpdateCheckOptions>(_ => { });
         services.Configure<IgnoredUpdateOptions>(_ => { });
+        services.Configure<ForgeCacheOptions>(_ => { });
 
         services.AddMemoryCache();
 
@@ -52,9 +52,9 @@ public static class ServiceCollectionExtensions
                 client.Timeout = TimeSpan.FromSeconds(rateLimitOptions.RequestTimeoutSeconds);
 
                 var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
-                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("SPT-Check-Mods", version));
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppIdentity.Name, version));
                 client.DefaultRequestHeaders.UserAgent.Add(
-                    new ProductInfoHeaderValue("(+https://github.com/refringe/SPT-Check-Mods)")
+                    new ProductInfoHeaderValue("(+" + AppIdentity.RepositoryUrl + ")")
                 );
             }
         );
@@ -67,12 +67,22 @@ public static class ServiceCollectionExtensions
                 client.Timeout = TimeSpan.FromSeconds(ignoredOptions.RemoteTimeoutSeconds);
 
                 var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
-                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("SPT-Check-Mods", version));
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppIdentity.Name, version));
                 client.DefaultRequestHeaders.UserAgent.Add(
-                    new ProductInfoHeaderValue("(+https://github.com/refringe/SPT-Check-Mods)")
+                    new ProductInfoHeaderValue("(+" + AppIdentity.RepositoryUrl + ")")
                 );
             }
         );
+
+        // Self-update check against GitHub Releases. GitHub's API requires a User-Agent.
+        services.AddHttpClient<IUpdateCheckService, UpdateCheckService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+
+            var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppIdentity.Name, version));
+            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        });
 
         return services;
     }

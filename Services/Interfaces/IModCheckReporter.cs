@@ -1,6 +1,6 @@
-using CheckMods.Models;
+using ModPulse.Models;
 
-namespace CheckMods.Services.Interfaces;
+namespace ModPulse.Services.Interfaces;
 
 /// <summary>
 /// Renders the user-facing console output for the mod-check workflow.
@@ -61,8 +61,8 @@ public interface IModCheckReporter
     /// <summary>Reports the latest available SPT update.</summary>
     void SptUpdateAvailable(SptVersionResult latest);
 
-    /// <summary>Displays the outcome of the Check Mods self-update check.</summary>
-    void CheckModsUpdate(CheckModsUpdateResult result, SemanticVersioning.Version sptVersion);
+    /// <summary>Displays the outcome of the ModPulse self-update check.</summary>
+    void ModPulseUpdate(ModPulseUpdateResult result, SemanticVersioning.Version sptVersion);
 
     /// <summary>Reports that no mods were found, with the expected install locations.</summary>
     void NoModsFound();

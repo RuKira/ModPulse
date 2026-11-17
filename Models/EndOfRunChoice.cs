@@ -1,4 +1,4 @@
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// The action a user picks from the end-of-run menu.

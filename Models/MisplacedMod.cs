@@ -1,4 +1,4 @@
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Represents a mod discovered in the wrong installation directory.
@@ -38,7 +38,7 @@ public sealed record CrossInstalledDirectory(
 /// </summary>
 /// <param name="WrongFolder">
 /// Mods found in the wrong installation folder entirely (a server mod under BepInEx/plugins, or a client mod under
-/// SPT/user/mods).
+/// the server's user/mods).
 /// </param>
 /// <param name="CrossInstalled">Plugins subdirectories that contain two or more unrelated mods.</param>
 public sealed record MisplacedModReport(

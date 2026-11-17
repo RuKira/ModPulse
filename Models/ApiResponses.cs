@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Response from the Forge API mod search endpoint.
@@ -27,6 +27,12 @@ public record ModSearchResult(
     [property: JsonPropertyName("versions")] List<ModVersion>? Versions
 )
 {
+    /// <summary>
+    /// The mod's GUID on the Forge (e.g. "com.author.modname"), when the API includes it.
+    /// </summary>
+    [JsonPropertyName("guid")]
+    public string? Guid { get; init; }
+
     /// <summary>
     /// Gets the primary source code URL (first link if available).
     /// </summary>

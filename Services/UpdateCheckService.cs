@@ -1,139 +1,74 @@
-using CheckMods.Configuration;
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using System.Net;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using SPTarkov.DI.Annotations;
+using ModPulse.Configuration;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
-/// Checks whether a newer version of Check Mods is available on the Forge, using the Forge API's mod updates endpoint.
+/// Checks GitHub Releases for a newer ModPulse build. Registered via AddHttpClient (no [Injectable]).
 /// </summary>
-[Injectable(InjectionType.Transient)]
-public sealed class UpdateCheckService(
-    IForgeApiService forgeApiService,
-    IOptions<UpdateCheckOptions> options,
-    ILogger<UpdateCheckService> logger
-) : IUpdateCheckService
+public sealed class UpdateCheckService(HttpClient httpClient, ILogger<UpdateCheckService> logger) : IUpdateCheckService
 {
-    private readonly UpdateCheckOptions _options = options.Value;
-
     /// <inheritdoc />
-    public async Task<CheckModsUpdateResult> CheckAsync(
+    public async Task<ModPulseUpdateResult> CheckAsync(
         SemanticVersioning.Version sptVersion,
         CancellationToken cancellationToken = default
     )
     {
         var currentVersion = VersionInfo.SemVer;
-        var modId = _options.ForgeModId;
+        logger.LogDebug("Checking {Url} for ModPulse updates (current {Version})", AppIdentity.LatestReleaseApiUrl, currentVersion);
 
-        logger.LogDebug(
-            "Checking for Check Mods updates (mod {ModId}, current version {Version}, SPT {SptVersion})",
-            modId,
-            currentVersion,
-            sptVersion
-        );
-
-        var updatesResult = await forgeApiService.GetModUpdatesAsync(
-            [(modId, currentVersion)],
-            sptVersion,
-            cancellationToken
-        );
-
-        if (updatesResult.TryPickT0(out var data, out var remainder))
+        try
         {
-            var interpreted = InterpretUpdates(data, modId, currentVersion);
-            if (interpreted is not null)
+            using var response = await httpClient.GetAsync(AppIdentity.LatestReleaseApiUrl, cancellationToken);
+            if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                return interpreted;
+                logger.LogDebug("No ModPulse release published yet");
+                return new ModPulseUpdateResult(ModPulseUpdateStatus.Unavailable, currentVersion);
             }
 
-            // The running version isn't a recognized Forge release.
-            return await ResolveUnrecognizedAsync(modId, currentVersion, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            return Interpret(json, currentVersion);
         }
-
-        if (remainder.IsT0)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return await ResolveUnrecognizedAsync(modId, currentVersion, cancellationToken);
+            throw;
         }
-
-        logger.LogDebug("Check Mods update check failed: API error");
-        return new CheckModsUpdateResult(CheckModsUpdateStatus.Unavailable, currentVersion);
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogDebug(ex, "ModPulse update check failed");
+            return new ModPulseUpdateResult(ModPulseUpdateStatus.Unavailable, currentVersion);
+        }
     }
 
     /// <summary>
-    /// Maps a categorized mod-updates response to an update result for the given mod, or null when the mod is absent
-    /// from every category (the current version couldn't be resolved).
+    /// Compares a GitHub "latest release" JSON payload against the running version.
     /// </summary>
-    public static CheckModsUpdateResult? InterpretUpdates(ModUpdatesData data, int modId, string currentVersion)
+    /// <param name="releaseJson">Body of <c>GET /repos/{owner}/{repo}/releases/latest</c>.</param>
+    /// <param name="currentVersion">The running version.</param>
+    public static ModPulseUpdateResult Interpret(string releaseJson, string currentVersion)
     {
-        var safe = data.SafeToUpdate?.FirstOrDefault(u => u.ModId == modId);
-        if (safe?.RecommendedVersion is not null)
+        using var doc = JsonDocument.Parse(releaseJson);
+        var root = doc.RootElement;
+
+        var tag = root.TryGetProperty("tag_name", out var t) ? t.GetString() : null;
+        var pageUrl = root.TryGetProperty("html_url", out var u) ? u.GetString() : null;
+
+        // Tags are usually "v1.2.3"; accept "1.2.3" too.
+        var latest = SemVer.TryParse(tag?.TrimStart('v', 'V'));
+        var current = SemVer.TryParse(currentVersion);
+        if (latest is null || current is null)
         {
-            return new CheckModsUpdateResult(
-                CheckModsUpdateStatus.UpdateAvailable,
-                currentVersion,
-                safe.RecommendedVersion.Version,
-                safe.RecommendedVersion.Link
-            );
+            return new ModPulseUpdateResult(ModPulseUpdateStatus.Unavailable, currentVersion);
         }
 
-        if (data.UpToDate?.Any(u => u.ModId == modId) == true)
-        {
-            return new CheckModsUpdateResult(CheckModsUpdateStatus.UpToDate, currentVersion);
-        }
-
-        var incompatible = data.Incompatible?.FirstOrDefault(i => i.ModId == modId);
-        if (incompatible is not null)
-        {
-            return new CheckModsUpdateResult(
-                CheckModsUpdateStatus.IncompatibleWithSpt,
-                currentVersion,
-                incompatible.LatestCompatibleVersion?.Version
-            );
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Handles the case where the running version wasn't recognized. If the mod exists on the Forge, suggests the
-    /// latest stable version; otherwise reports the check as unavailable.
-    /// </summary>
-    private async Task<CheckModsUpdateResult> ResolveUnrecognizedAsync(
-        int modId,
-        string currentVersion,
-        CancellationToken cancellationToken
-    )
-    {
-        var modResult = await forgeApiService.GetModByIdAsync(modId, cancellationToken);
-
-        if (!modResult.TryPickT0(out var mod, out _) || mod.Versions is not { Count: > 0 })
-        {
-            // Mod missing/disabled, or no versions to recommend.
-            return new CheckModsUpdateResult(CheckModsUpdateStatus.Unavailable, currentVersion);
-        }
-
-        var latestStable = mod
-            .Versions.Select(v => (Raw: v, Parsed: SemVer.TryParse(v.Version)))
-            .Where(x => x.Parsed is not null && string.IsNullOrEmpty(x.Parsed!.PreRelease))
-            .OrderByDescending(x => x.Parsed)
-            .Select(x => x.Raw)
-            .FirstOrDefault();
-
-        if (latestStable is null)
-        {
-            return new CheckModsUpdateResult(CheckModsUpdateStatus.Unavailable, currentVersion);
-        }
-
-        var downloadLink = !string.IsNullOrWhiteSpace(latestStable.Link) ? latestStable.Link : mod.DetailUrl;
-        return new CheckModsUpdateResult(
-            CheckModsUpdateStatus.UnrecognizedBuild,
-            currentVersion,
-            latestStable.Version,
-            downloadLink
-        );
+        return latest > current
+            ? new ModPulseUpdateResult(ModPulseUpdateStatus.UpdateAvailable, currentVersion, latest.ToString(), pageUrl)
+            : new ModPulseUpdateResult(ModPulseUpdateStatus.UpToDate, currentVersion, latest.ToString(), pageUrl);
     }
 }

@@ -1,4 +1,4 @@
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Represents a successful absence of data - the resource was not found but no error occurred.

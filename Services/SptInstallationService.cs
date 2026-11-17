@@ -1,10 +1,10 @@
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Microsoft.Extensions.Logging;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Service responsible for SPT installation validation.
@@ -25,22 +25,32 @@ public sealed class SptInstallationService(
     {
         logger.LogDebug("Validating SPT installation at: {SptPath}", sptPath);
 
-        var coreDllPath = Path.Combine(sptPath, "SPT", "SPTarkov.Server.Core.dll");
-        if (!File.Exists(coreDllPath))
+        var installation = SptLayout.Resolve(sptPath);
+        if (installation is null)
         {
-            logger.LogError("SPT core DLL not found: {CoreDllPath}", coreDllPath);
+            logger.LogError("No SPT server found in or below {SptPath}", sptPath);
             reporter.Error(
-                "Error: Could not find SPT installation. Run this file in your root SPT directory, or provide the SPT path as an argument."
+                $"Error: Could not find an SPT installation ({SptLayout.SupportedRangeText}). Run this file in your root SPT directory, or provide the SPT path as an argument."
             );
             return null;
         }
+
+        logger.LogDebug(
+            "SPT server kind {Kind} at {ServerRoot} (game root {GameRoot})",
+            installation.Kind,
+            installation.ServerRoot,
+            installation.GameRoot
+        );
 
         var localSptVersionStr = scannerService.GetSptVersion(sptPath);
 
         if (string.IsNullOrWhiteSpace(localSptVersionStr))
         {
-            logger.LogError("Could not extract SPT version from core DLL");
-            reporter.Error("Error: SPT version not found in SPTarkov.Server.Core.dll.");
+            var source = installation.Kind == SptServerKind.DotNet
+                ? "SPTarkov.Server.Core.dll"
+                : "SPT_Data/Server/configs/core.json or SPT.Server.exe";
+            logger.LogError("Could not read the SPT version from {Source}", source);
+            reporter.Error($"Error: SPT version not found in {source}.");
             return null;
         }
 
@@ -76,6 +86,29 @@ public sealed class SptInstallationService(
         }
 
         reporter.Success("OK");
+
+        if (!SptLayout.IsSupported(localSptVersion))
+        {
+            logger.LogWarning("SPT {Version} is outside the supported range", localSptVersion);
+            reporter.Warning(
+                $"SPT {localSptVersion} is outside the versions ModPulse supports ({SptLayout.SupportedRangeText}). Results may be incomplete."
+            );
+        }
+
+        var folderMismatch = SptLayout.DescribeFolderMismatch(installation, localSptVersion);
+        if (folderMismatch is not null)
+        {
+            logger.LogWarning("Server folder/version mismatch: {Message}", folderMismatch);
+            reporter.Warning(folderMismatch);
+        }
+
+        if (SptLayout.IsLegacy(localSptVersion))
+        {
+            reporter.Warning(
+                $"SPT {localSptVersion} is a legacy version (below 3.11). Limited support: installed mods are assumed to match this SPT version, mods are labeled Legacy, and only updates published for SPT {localSptVersion} are offered."
+            );
+        }
+
         return localSptVersion;
     }
 

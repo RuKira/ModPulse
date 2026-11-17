@@ -1,10 +1,10 @@
-using CheckMods.Models;
-using CheckMods.Services.Interfaces;
-using CheckMods.Utils;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
 using Microsoft.Extensions.Logging;
 using SPTarkov.DI.Annotations;
 
-namespace CheckMods.Services;
+namespace ModPulse.Services;
 
 /// <summary>
 /// Service responsible for analyzing mod dependencies and building a dependency tree.
@@ -23,6 +23,7 @@ public sealed class ModDependencyService(IForgeApiService forgeApiService, ILogg
     public async Task<DependencyAnalysisResult> AnalyzeDependenciesAsync(
         IEnumerable<Mod> mods,
         HashSet<string> installedModGuids,
+        SemanticVersioning.Version? sptVersion = null,
         Action<int, int>? progressCallback = null,
         CancellationToken cancellationToken = default
     )
@@ -95,6 +96,7 @@ public sealed class ModDependencyService(IForgeApiService forgeApiService, ILogg
 
             var depsResult = await forgeApiService.GetModDependenciesAsync(
                 [(modId.ToString(), mod.LocalVersion)],
+                sptVersion,
                 cancellationToken
             );
 
@@ -121,6 +123,7 @@ public sealed class ModDependencyService(IForgeApiService forgeApiService, ILogg
 
             var targetResult = await forgeApiService.GetModDependenciesAsync(
                 [(modId.ToString(), targetVersion)],
+                sptVersion,
                 cancellationToken
             );
 

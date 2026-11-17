@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace CheckMods.Configuration;
+namespace ModPulse.Configuration;
 
 /// <summary>
 /// Configuration options for the logging infrastructure.
@@ -41,7 +41,7 @@ public class LoggingOptions
         {
             return Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "SptCheckMods",
+                AppIdentity.AppDataFolderName,
                 "logs"
             );
         }
@@ -49,6 +49,6 @@ public class LoggingOptions
 
     public static string CurrentLogFilePath
     {
-        get { return Path.Combine(LogDirectory, "checkmod.log"); }
+        get { return Path.Combine(LogDirectory, "modpulse.log"); }
     }
 }

@@ -1,4 +1,4 @@
-namespace CheckMods.Models;
+namespace ModPulse.Models;
 
 /// <summary>
 /// Represents a BepInEx plugin attribute containing metadata about a client mod.
