@@ -1,0 +1,12 @@
+namespace CheckMods.Configuration;
+
+/// <summary>
+/// Configuration options for the mod scanner service.
+/// </summary>
+public class ModScannerOptions
+{
+    /// <summary>
+    /// Maximum DLL file size in bytes to scan (default: 100MB).
+    /// </summary>
+    public long MaxDllSizeBytes { get; set; } = 100 * 1024 * 1024;
+}
