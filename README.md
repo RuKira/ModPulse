@@ -11,6 +11,9 @@ Two front ends, same checks (both built on `ModPulse.Core`):
 
 Based on SPT-Check-Mods by Refringe (MIT).
 
+## AI Notice
+AI Assisted with the planning of the GUI version, the Front-end of the WPF app, and the creation of the workflow. (and this README)
+
 ## Supported SPT versions
 
 | SPT | Server folder | Version read from | Support |
