@@ -1,0 +1,102 @@
+<Project>
+  <!-- Version stamping (all projects) and release packaging (exes only). -->
+
+  <Target Name="GetGitHash" BeforeTargets="GetAssemblyAttributes;Publish">
+    <!-- Capture the current Git commit hash and set it as a property. -->
+    <Exec
+      Command="git rev-parse --short=6 HEAD"
+      ConsoleToMSBuild="true"
+      IgnoreExitCode="true"
+      StandardOutputImportance="low"
+      StandardErrorImportance="low"
+      EchoOff="true"
+    >
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitHash" />
+      <Output TaskParameter="ExitCode" PropertyName="GitExitCode" />
+    </Exec>
+    <PropertyGroup>
+      <GitHash Condition="'$(GitExitCode)' != '0'">unknown</GitHash>
+      <GitHash Condition="'$(GitHash)' == ''">unknown</GitHash>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="SetMetadata" BeforeTargets="GetAssemblyAttributes" DependsOnTargets="GetGitHash">
+    <PropertyGroup>
+      <!-- Use the tag-provided BuildVersion for releases, otherwise the VersionPrefix baseline. -->
+      <_EffectiveVersion Condition="'$(BuildVersion)' != ''">$(BuildVersion)</_EffectiveVersion>
+      <_EffectiveVersion Condition="'$(BuildVersion)' == ''">$(VersionPrefix)</_EffectiveVersion>
+      <!-- AssemblyVersion/FileVersion must be numeric (MAJOR.MINOR.PATCH.0); strip any prerelease suffix. -->
+      <_VersionCore>$([System.Text.RegularExpressions.Regex]::Match($(_EffectiveVersion), `^[0-9]+\.[0-9]+\.[0-9]+`))</_VersionCore>
+      <_VersionCore Condition="'$(_VersionCore)' == ''">0.0.0</_VersionCore>
+      <AssemblyVersion>$(_VersionCore).0</AssemblyVersion>
+      <FileVersion>$(_VersionCore).0</FileVersion>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- Embed the git hash for diagnostics. -->
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>GitHash</_Parameter1>
+        <_Parameter2>$(GitHash)</_Parameter2>
+      </AssemblyAttribute>
+      <!--
+      Product version is a clean semver plus the git hash as build metadata (e.g. 1.0.1+abc123). The runtime reads this
+      and strips the build metadata to get the comparable semver.
+      -->
+      <AssemblyAttribute Include="System.Reflection.AssemblyInformationalVersionAttribute">
+        <_Parameter1>$(_EffectiveVersion)+$(GitHash)</_Parameter1>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
+
+  <!-- Release packaging: only for the two exes, and only when publishing for a runtime (-r). -->
+  <PropertyGroup>
+    <_IsModPulseExe Condition="'$(OutputType)' == 'Exe' OR '$(OutputType)' == 'WinExe'">true</_IsModPulseExe>
+    <_IsModPulseExe Condition="'$(IsTestProject)' == 'true'">false</_IsModPulseExe>
+  </PropertyGroup>
+
+  <!-- Rename the published executable to include the runtime identifier. -->
+  <Target Name="RenamePublishedExe" AfterTargets="Publish" Condition="'$(_IsModPulseExe)' == 'true'">
+    <Move
+      Condition="'$(RuntimeIdentifier)' != '' AND $(RuntimeIdentifier.StartsWith('win'))"
+      SourceFiles="$(PublishDir)$(AssemblyName).exe"
+      DestinationFiles="$(PublishDir)$(AssemblyName)-$(RuntimeIdentifier).exe"
+    />
+    <Move
+      Condition="'$(RuntimeIdentifier)' != '' AND !$(RuntimeIdentifier.StartsWith('win'))"
+      SourceFiles="$(PublishDir)$(AssemblyName)"
+      DestinationFiles="$(PublishDir)$(AssemblyName)-$(RuntimeIdentifier)"
+    />
+  </Target>
+
+  <!-- Compress the Windows executable into a zip file with optimal compression. -->
+  <UsingTask
+    TaskName="ZipFileWithCompression"
+    TaskFactory="RoslynCodeTaskFactory"
+    AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll"
+  >
+    <ParameterGroup>
+      <SourceFile ParameterType="System.String" Required="true" />
+      <DestinationArchive ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.IO.Compression" />
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+          if (File.Exists(DestinationArchive)) File.Delete(DestinationArchive);
+          using var archive = ZipFile.Open(DestinationArchive, ZipArchiveMode.Create);
+          archive.CreateEntryFromFile(SourceFile, Path.GetFileName(SourceFile), CompressionLevel.Optimal);
+        ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+  <Target
+    Name="ZipWindowsExe"
+    AfterTargets="RenamePublishedExe"
+    Condition="'$(_IsModPulseExe)' == 'true' AND '$(RuntimeIdentifier)' != '' AND $(RuntimeIdentifier.StartsWith('win'))"
+  >
+    <ZipFileWithCompression
+      SourceFile="$(PublishDir)$(AssemblyName)-$(RuntimeIdentifier).exe"
+      DestinationArchive="$(PublishDir)$(AssemblyName)-$(RuntimeIdentifier).zip"
+    />
+  </Target>
+</Project>

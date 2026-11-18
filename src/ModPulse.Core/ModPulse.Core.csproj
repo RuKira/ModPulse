@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+  Everything both front ends share: SPT layout detection, mod scanning, Forge API + cache, matching, enrichment,
+  legacy policy, compatibility, dependencies, ignore list and the self-update check.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>ModPulse.Core</AssemblyName>
+    <AssemblyTitle>ModPulse Core</AssemblyTitle>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ModPulseCLI" />
+    <InternalsVisibleTo Include="ModPulseGUI" />
+    <InternalsVisibleTo Include="ModPulse.Tests" />
+    <InternalsVisibleTo Include="ModPulseGUI.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The community ignore list ships inside ModPulse so it applies without a download (see BuiltInIgnoreList). -->
+    <EmbeddedResource Include="..\..\community\ignored-updates.json" LogicalName="ModPulse.Community.ignored-updates.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FuzzySharp" Version="2.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.9" />
+    <PackageReference Include="OneOf" Version="3.0.271" />
+    <PackageReference Include="SemanticVersioning" Version="3.0.0" />
+    <PackageReference Include="SPTarkov.DI" Version="4.0.13" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.9" />
+    <PackageReference Include="System.Threading.RateLimiting" Version="10.0.9" />
+  </ItemGroup>
+</Project>

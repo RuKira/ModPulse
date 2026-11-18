@@ -1,0 +1,35 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+    Neutral palette that ships in the repo. A personal palette with the same keys can go in Colors.local.xaml
+    (gitignored), which App.xaml.cs loads instead when it exists.
+    -->
+
+    <!-- Surfaces -->
+    <Color x:Key="Color.Window">#FF18181B</Color>
+    <Color x:Key="Color.Surface">#FF202024</Color>
+    <Color x:Key="Color.SurfaceAlt">#FF27272C</Color>
+    <Color x:Key="Color.Border">#FF3A3A42</Color>
+
+    <!-- Controls -->
+    <Color x:Key="Color.Control">#FF33333B</Color>
+    <Color x:Key="Color.ControlHover">#FF3E3E47</Color>
+    <Color x:Key="Color.ControlPressed">#FF4A4A54</Color>
+    <Color x:Key="Color.Input">#FF222227</Color>
+
+    <!-- Text -->
+    <Color x:Key="Color.Text">#FFF2F2F2</Color>
+    <Color x:Key="Color.TextMuted">#FFB4B4BC</Color>
+    <Color x:Key="Color.TextDim">#FF7E7E88</Color>
+
+    <!-- Accent (tabs, primary action, focus) and the text drawn on it -->
+    <Color x:Key="Color.Accent">#FF7FB3E0</Color>
+    <Color x:Key="Color.OnAccent">#FF121214</Color>
+
+    <!-- Status -->
+    <Color x:Key="Color.Ok">#FF8FD6A8</Color>
+    <Color x:Key="Color.Update">#FFF2C66D</Color>
+    <Color x:Key="Color.Bad">#FFF28B9B</Color>
+    <Color x:Key="Color.Legacy">#FFC4AEE8</Color>
+    <Color x:Key="Color.Info">#FF7FB3E0</Color>
+</ResourceDictionary>

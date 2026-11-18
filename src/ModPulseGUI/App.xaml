@@ -1,0 +1,11 @@
+<Application x:Class="ModPulse.Gui.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:ModPulse.Gui"
+             ShutdownMode="OnMainWindowClose">
+    <!-- Colors, brushes and control styles are added in App.xaml.cs (the palette is picked at startup). -->
+    <Application.Resources>
+        <local:EqualsToVisibilityConverter x:Key="EqualsToVisibility" />
+        <local:HasValueToVisibilityConverter x:Key="HasValueToVisibility" />
+    </Application.Resources>
+</Application>

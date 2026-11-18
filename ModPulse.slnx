@@ -1,6 +1,11 @@
 <Solution>
-    <Folder Name="/Tests/">
-        <Project Path="Tests/ModPulse.Tests/ModPulse.Tests.csproj" />
-    </Folder>
-    <Project Path="ModPulse.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/ModPulse.Core/ModPulse.Core.csproj" />
+    <Project Path="src/ModPulseCLI/ModPulseCLI.csproj" />
+    <Project Path="src/ModPulseGUI/ModPulseGUI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ModPulse.Tests/ModPulse.Tests.csproj" />
+    <Project Path="tests/ModPulseGUI.Tests/ModPulseGUI.Tests.csproj" />
+  </Folder>
 </Solution>

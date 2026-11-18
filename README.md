@@ -1,7 +1,13 @@
 # ModPulse
 
 SPT mod checker: checks your installed mods for updates, SPT compatibility and dependency problems against the
-Forge API. It only checks and links; it is not a mod manager. Command-line tool.
+Forge API. It only checks and links; it is not a mod manager.
+
+Two front ends, same checks (both built on `ModPulse.Core`):
+
+- **ModPulseGUI**: a desktop app. Pick your SPT folder, press *Check mods*, and browse the results by tab: Updates,
+  Incompatible, Dependencies, Not on Forge, Install notes, All mods.
+- **ModPulseCLI**: the command-line tool.
 
 Based on SPT-Check-Mods by Refringe (MIT).
 
@@ -37,7 +43,7 @@ mostly runs from the cache (seconds instead of minutes). Update status is refres
 searches and dependencies keep for 12–24 hours. Errors are never cached.
 
 ```
-ModPulse.exe [SptPath] [--refresh]
+ModPulseCLI.exe [SptPath] [--refresh]
 ```
 
 `--refresh` ignores the cache for that run (fresh answers are still saved for next time).
@@ -51,13 +57,20 @@ None. Releases are a standalone single-file exe with the .NET 10 runtime bundled
 
 ```
 dotnet build ModPulse.slnx
-dotnet test Tests/ModPulse.Tests
-dotnet publish ModPulse.csproj -c Release -r win-x64
+dotnet test ModPulse.slnx
+dotnet publish src/ModPulseCLI/ModPulseCLI.csproj -c Release -r win-x64
+dotnet publish src/ModPulseGUI/ModPulseGUI.csproj -c Release -r win-x64
 ```
 
-`publish` with `-r` produces one standalone exe (plus a zip of it). `build` and `test` stay framework-dependent.
+`publish` with `-r` produces one standalone exe per front end (plus a zip of it). `build` and `test` stay
+framework-dependent.
+
+Layout: `src/ModPulse.Core` (all checking logic), `src/ModPulseCLI`, `src/ModPulseGUI` (WPF), `tests/`.
+
+The GUI's colors come from `src/ModPulseGUI/Themes/Colors.default.xaml`. A personal palette with the same keys can go in
+`Themes/Colors.local.xaml` (gitignored); when that file exists it is compiled in and used instead.
 
 ## Identity
 
-`Configuration/AppIdentity.cs` holds the name, GUID and GitHub owner/repo used for self-update checks (GitHub
+`src/ModPulse.Core/Configuration/AppIdentity.cs` holds the name, GUID and GitHub owner/repo used for self-update checks (GitHub
 Releases) and issue links. The GUID is a placeholder until the final one is chosen.

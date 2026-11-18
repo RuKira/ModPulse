@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- ModPulseGUI: the WPF front end. Shares all checking logic with ModPulseCLI through ModPulse.Core. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>ModPulseGUI</AssemblyName>
+    <AssemblyTitle>ModPulseGUI</AssemblyTitle>
+    <ApplicationIcon>..\..\assets\check-mods.ico</ApplicationIcon>
+    <!-- Standalone single-file exe when publishing with -r (no .NET install needed), like the CLI. -->
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
+    <SelfContained Condition="'$(RuntimeIdentifier)' == ''">false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ModPulseGUI.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ModPulse.Core\ModPulse.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="..\..\assets\check-mods.ico" Link="Assets\check-mods.ico" />
+  </ItemGroup>
+  <!--
+  Colors: Themes/Colors.default.xaml is a neutral palette that ships in the repo. A personal palette can live in
+  Themes/Colors.local.xaml (gitignored); when present it is compiled in too and App.xaml.cs loads it instead.
+  -->
+  <ItemGroup>
+    <Page Remove="Themes\Colors.local.xaml" />
+    <Page Include="Themes\Colors.local.xaml" Condition="Exists('Themes\Colors.local.xaml')" />
+  </ItemGroup>
+</Project>

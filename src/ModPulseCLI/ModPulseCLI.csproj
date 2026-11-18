@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- ModPulseCLI: the console front end (Spectre.Console). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>ModPulseCLI</AssemblyName>
+    <AssemblyTitle>ModPulseCLI</AssemblyTitle>
+    <ApplicationIcon>..\..\assets\check-mods.ico</ApplicationIcon>
+    <!--
+    Publish a standalone single-file exe: the .NET runtime is bundled, so users don't need .NET 10 installed.
+    Self-contained requires a runtime identifier, so it only applies to publishes with -r (plain builds stay
+    framework-dependent).
+    -->
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
+    <SelfContained Condition="'$(RuntimeIdentifier)' == ''">false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ModPulse.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ModPulse.Core\ModPulse.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.ILLink.Tasks" Version="10.0.9" />
+    <PackageReference Include="Spectre.Console" Version="0.57.0" />
+  </ItemGroup>
+</Project>

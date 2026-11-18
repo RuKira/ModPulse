@@ -1,0 +1,714 @@
+using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using ModPulse.Configuration;
+using ModPulse.Models;
+using ModPulse.Services.Interfaces;
+using ModPulse.Utils;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using OneOf;
+
+namespace ModPulse.Services;
+
+/// <summary>
+/// Service for interacting with the Forge API with rate limiting. Handles mod searching, version validation, and data
+/// retrieval.
+/// </summary>
+/// <remarks>
+/// Registered manually in ServiceCollectionExtensions via AddHttpClient, not via [Injectable].
+/// </remarks>
+public sealed partial class ForgeApiService(
+    HttpClient httpClient,
+    IRateLimitService rateLimitService,
+    IMemoryCache cache,
+    IForgeResponseCache diskCache,
+    IOptions<ForgeApiOptions> options,
+    ILogger<ForgeApiService> logger
+) : IForgeApiService
+{
+    private readonly ForgeApiOptions _options = options.Value;
+
+    /// <summary>
+    /// Maximum number of mods sent in a single batch updates request.
+    /// </summary>
+    private const int MaxModsPerUpdateRequest = 50;
+
+    private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>
+    /// Cache lifetime for API responses.
+    /// </summary>
+    private static readonly MemoryCacheEntryOptions _cacheEntryOptions = new()
+    {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10),
+    };
+
+    /// <summary>
+    /// A cached HTTP response: the status code and body text from a completed request.
+    /// </summary>
+    private sealed record CachedResponse(HttpStatusCode StatusCode, string Body)
+    {
+        public bool IsSuccessStatusCode
+        {
+            get { return (int)StatusCode is >= 200 and < 300; }
+        }
+    }
+
+    /// <summary>
+    /// Issues a rate-limited GET request and returns its status code and body. Successful (2xx) and NotFound (404)
+    /// responses are cached by URL, in memory for this run and on disk for later runs; errors (including 429) are
+    /// never cached.
+    /// </summary>
+    /// <param name="url">The request URL, which doubles as the cache key.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    private async Task<CachedResponse> GetJsonAsync(string url, CancellationToken cancellationToken)
+    {
+        if (cache.TryGetValue(url, out CachedResponse? cached) && cached is not null)
+        {
+            logger.LogDebug("Cache hit: GET {Url}", url);
+            return cached;
+        }
+
+        if (diskCache.TryGet(url, out var diskStatus, out var diskBody))
+        {
+            logger.LogDebug("Disk cache hit: GET {Url}", url);
+            var fromDisk = new CachedResponse((HttpStatusCode)diskStatus, diskBody);
+            cache.Set(url, fromDisk, _cacheEntryOptions);
+            return fromDisk;
+        }
+
+        logger.LogDebug("API Request: GET {Url}", url);
+        var response = await rateLimitService.ExecuteWithRetryAsync(
+            () => httpClient.GetAsync(url, cancellationToken),
+            cancellationToken
+        );
+
+        var statusCode = response.StatusCode;
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        response.Dispose();
+
+        var result = new CachedResponse(statusCode, body);
+        if (result.IsSuccessStatusCode || statusCode == HttpStatusCode.NotFound)
+        {
+            cache.Set(url, result, _cacheEntryOptions);
+            diskCache.Set(url, (int)statusCode, body);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reads a dependencies response. Forge now returns <c>data</c> as an object keyed by <c>"modId:version"</c>
+    /// (each value a list of dependencies); older responses used a flat list. Both are accepted, and the per-mod lists
+    /// are flattened. Returns null when the response isn't a successful one.
+    /// </summary>
+    internal static List<ModDependency>? ParseDependencies(string body)
+    {
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        if (!root.TryGetProperty("success", out var success) || success.ValueKind != JsonValueKind.True)
+        {
+            return null;
+        }
+
+        if (!root.TryGetProperty("data", out var data))
+        {
+            return null;
+        }
+
+        return data.ValueKind switch
+        {
+            JsonValueKind.Array => data.Deserialize<List<ModDependency>>(_jsonOptions) ?? [],
+            JsonValueKind.Object => data
+                .EnumerateObject()
+                .SelectMany(entry =>
+                    entry.Value.ValueKind == JsonValueKind.Array
+                        ? entry.Value.Deserialize<List<ModDependency>>(_jsonOptions) ?? []
+                        : []
+                )
+                .ToList(),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// A regular expression to convert camelCase strings to space-separated words.
+    /// </summary>
+    [GeneratedRegex(@"(?<!^)(?<![\p{Lu}])(?=[\p{Lu}])|(?<=[\p{Ll}])(?=[\p{Lu}])")]
+    private static partial Regex ConvertCamelCaseRegex();
+
+    /// <summary>
+    /// Converts camelCase strings to space-separated words. Handles special cases like
+    /// all-uppercase strings (MOAR, SPT, API).
+    /// </summary>
+    /// <param name="input">The camelCase string to convert.</param>
+    private static string ConvertCamelCaseToSpaces(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return input;
+        }
+
+        // Handle special cases where the entire string is uppercase (like "MOAR")
+        if (input.All(c => !char.IsLetter(c) || char.IsUpper(c)))
+        {
+            return input;
+        }
+
+        return ConvertCamelCaseRegex().Replace(input, " ").Trim();
+    }
+
+    /// <summary>
+    /// Validates that an SPT version exists in the Forge API.
+    /// </summary>
+    /// <param name="sptVersion">The SPT version to validate.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>
+    /// One of:
+    /// - bool (true): The SPT version is valid
+    /// - InvalidSptVersion: The SPT version does not exist
+    /// - ApiError: An error occurred during validation
+    /// </returns>
+    public async Task<OneOf<bool, InvalidSptVersion, ApiError>> ValidateSptVersionAsync(
+        string sptVersion,
+        CancellationToken cancellationToken = default
+    )
+    {
+        logger.LogDebug("Validating SPT version: {SptVersion}", sptVersion);
+
+        try
+        {
+            var escapedVersion = Uri.EscapeDataString(sptVersion);
+            var url = $"{_options.BaseUrl}spt/versions?filter[spt_version]={escapedVersion}";
+
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogError("SPT version validation failed: {StatusCode}", response.StatusCode);
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<SptVersionApiResponse>(response.Body, _jsonOptions);
+
+            var isValid =
+                apiResponse is { Success: true, Data: not null } && apiResponse.Data.Any(v => v.Version == sptVersion);
+
+            if (!isValid)
+            {
+                logger.LogWarning("SPT version {SptVersion} not found in Forge API", sptVersion);
+                return new InvalidSptVersion();
+            }
+
+            logger.LogDebug("SPT version {SptVersion} validated successfully", sptVersion);
+            return true;
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "Network error during SPT version validation");
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse SPT version validation response");
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+
+    /// <summary>
+    /// Retrieves all available SPT versions from the Forge API.
+    /// </summary>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>List of all available SPT versions or an error.</returns>
+    public async Task<OneOf<List<SptVersionResult>, ApiError>> GetAllSptVersionsAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        logger.LogDebug("Fetching all SPT versions from Forge API");
+
+        try
+        {
+            var url = $"{_options.BaseUrl}spt/versions?sort=-version&per_page=15";
+
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogError("Failed to fetch SPT versions: {StatusCode}", response.StatusCode);
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<SptVersionApiResponse>(response.Body, _jsonOptions);
+
+            return apiResponse is { Success: true, Data: not null } ? apiResponse.Data : [];
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "Network error during SPT versions fetch");
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse SPT versions response");
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+
+    /// <summary>
+    /// Searches for server mods using the Forge API search results.
+    /// </summary>
+    /// <param name="modName">The name of the mod to search for.</param>
+    /// <param name="sptVersion">The SPT version to filter by.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>List of matching mod search results or an error.</returns>
+    public async Task<OneOf<List<ModSearchResult>, ApiError>> SearchModsAsync(
+        string modName,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken = default
+    )
+    {
+        logger.LogDebug("Searching for server mod: {ModName}", modName);
+
+        var searchQuery = ConvertCamelCaseToSpaces(modName);
+        return await SearchModsInternalAsync(searchQuery, sptVersion, cancellationToken);
+    }
+
+    /// <summary>
+    /// Searches for client mods using the Forge API.
+    /// </summary>
+    /// <param name="modName">The name of the client mod to search for.</param>
+    /// <param name="sptVersion">The SPT version to filter by.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>List of matching client mod search results or an error.</returns>
+    public async Task<OneOf<List<ModSearchResult>, ApiError>> SearchClientModsAsync(
+        string modName,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken = default
+    )
+    {
+        logger.LogDebug("Searching for client mod: {ModName}", modName);
+
+        var searchQuery = ConvertCamelCaseToSpaces(modName);
+        return await SearchModsInternalAsync(searchQuery, sptVersion, cancellationToken);
+    }
+
+    /// <summary>
+    /// Retrieves a specific mod by its ID from the Forge API.
+    /// </summary>
+    /// <param name="modId">The ID of the mod to retrieve.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>The mod search result or an error type.</returns>
+    public async Task<OneOf<ModSearchResult, NotFound, InvalidInput, ApiError>> GetModByIdAsync(
+        int modId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        logger.LogDebug("Getting mod by ID: {ModId}", modId);
+
+        if (modId <= 0)
+        {
+            logger.LogWarning("Invalid mod ID: {ModId}", modId);
+            return new InvalidInput("modId", "Mod ID must be greater than 0");
+        }
+
+        try
+        {
+            var url = $"{_options.BaseUrl}mod/{modId}?include=versions,source_code_links";
+
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return new NotFound();
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            using var jsonDoc = JsonDocument.Parse(response.Body);
+
+            if (
+                !jsonDoc.RootElement.TryGetProperty("success", out var successElement)
+                || !successElement.GetBoolean()
+                || !jsonDoc.RootElement.TryGetProperty("data", out var dataElement)
+            )
+            {
+                return new NotFound();
+            }
+
+            var result = JsonSerializer.Deserialize<ModSearchResult>(dataElement.GetRawText(), _jsonOptions);
+            if (result is null)
+            {
+                return new NotFound();
+            }
+
+            return result;
+        }
+        catch (HttpRequestException ex)
+        {
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+
+    /// <summary>
+    /// Retrieves a mod by its GUID from the Forge API.
+    /// </summary>
+    /// <param name="modGuid">The GUID of the mod (e.g., "com.author.modname").</param>
+    /// <param name="sptVersion">The SPT version to filter by.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>The mod search result or an error type.</returns>
+    public async Task<OneOf<ModSearchResult, NotFound, NoCompatibleVersion, ApiError>> GetModByGuidAsync(
+        string modGuid,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken = default
+    )
+    {
+        logger.LogDebug("Getting mod by GUID: {ModGuid}", modGuid);
+
+        if (string.IsNullOrWhiteSpace(modGuid))
+        {
+            logger.LogDebug("Empty GUID provided");
+            return new NotFound();
+        }
+
+        try
+        {
+            // filter[guid] is case-insensitive, so the GUID is sent verbatim.
+            var url =
+                $"{_options.BaseUrl}mods?filter[guid]={Uri.EscapeDataString(modGuid)}&include=versions,source_code_links";
+
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<ModSearchApiResponse>(response.Body, _jsonOptions);
+
+            if (apiResponse is not { Success: true, Data.Count: > 0 })
+            {
+                return new NotFound();
+            }
+
+            var result = apiResponse.Data[0];
+
+            // Check if any version is compatible with the requested SPT version
+            if (result.Versions is not { Count: > 0 })
+            {
+                return result;
+            }
+
+            var hasCompatibleVersion = result.Versions.Any(v =>
+                SemVer.SupportsSpt(v.SptVersionConstraint, sptVersion)
+            );
+
+            // No published version targets the requested SPT version; return the matched mod as incompatible.
+            if (!hasCompatibleVersion)
+            {
+                return new NoCompatibleVersion(result);
+            }
+
+            return result;
+        }
+        catch (HttpRequestException ex)
+        {
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<OneOf<List<AddonResult>, ApiError>> GetAddonsForModAsync(
+        int modId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        logger.LogDebug("Getting addons for mod ID: {ModId}", modId);
+
+        try
+        {
+            var url = $"{_options.BaseUrl}addons?filter[mod_id]={modId}&include=versions&per_page=50";
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<AddonListApiResponse>(response.Body, _jsonOptions);
+            return apiResponse is { Success: true, Data: not null } ? apiResponse.Data : [];
+        }
+        catch (HttpRequestException ex)
+        {
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+
+    /// <summary>
+    /// Internal method for searching mods with shared logic between server and client mod searches.
+    /// </summary>
+    /// <param name="searchQuery">The processed search query.</param>
+    /// <param name="sptVersion">The SPT version to filter by.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>List of matching mod search results or an error.</returns>
+    private async Task<OneOf<List<ModSearchResult>, ApiError>> SearchModsInternalAsync(
+        string searchQuery,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var filtered = await SearchOnceAsync(searchQuery, sptVersion, cancellationToken);
+        if (!filtered.TryPickT0(out var results, out _))
+        {
+            return filtered;
+        }
+
+        if (results.Any(r => ModNameNormalizer.IsExactMatch(r.Name, searchQuery, removeComponentSuffixes: true)))
+        {
+            return results;
+        }
+
+        // The SPT filter is exact: a mod whose newest build is tagged for an older patch of this minor (e.g. "4.1.0" on
+        // a 4.1.6 server) doesn't show up. Without an exact name hit, search again unfiltered and add those results;
+        // compatibility is checked later from each match's version list.
+        var unfiltered = await SearchOnceAsync(searchQuery, null, cancellationToken);
+        if (!unfiltered.TryPickT0(out var more, out _))
+        {
+            return results;
+        }
+
+        var seen = results.Select(r => r.Id).ToHashSet();
+        return results.Concat(more.Where(r => seen.Add(r.Id))).ToList();
+    }
+
+    /// <summary>One mods search request, optionally filtered to an exact SPT version.</summary>
+    private async Task<OneOf<List<ModSearchResult>, ApiError>> SearchOnceAsync(
+        string searchQuery,
+        SemanticVersioning.Version? sptVersion,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var sptFilter = sptVersion is null ? string.Empty : $"&filter[spt_version]={sptVersion}";
+            var url =
+                $"{_options.BaseUrl}mods?query={Uri.EscapeDataString(searchQuery)}{sptFilter}&include=versions,source_code_links&per_page=50";
+
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<ModSearchApiResponse>(response.Body, _jsonOptions);
+
+            return apiResponse is { Success: true, Data: not null } ? apiResponse.Data : [];
+        }
+        catch (HttpRequestException ex)
+        {
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+
+    /// <summary>
+    /// Retrieves batch update information for multiple mods in a single API call.
+    /// </summary>
+    /// <param name="modUpdates">Collection of mod ID and current version pairs to check.</param>
+    /// <param name="sptVersion">The SPT version to check compatibility against.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>Categorized update information for the requested mods or an error.</returns>
+    public async Task<OneOf<ModUpdatesData, NotFound, ApiError>> GetModUpdatesAsync(
+        IEnumerable<(int ModId, string CurrentVersion)> modUpdates,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var modList = modUpdates.ToList();
+        if (modList.Count == 0)
+        {
+            return new NotFound();
+        }
+
+        // When the whole batch fits in one request, call it directly and return its result.
+        if (modList.Count <= MaxModsPerUpdateRequest)
+        {
+            return await GetModUpdatesChunkAsync(modList, sptVersion, cancellationToken);
+        }
+
+        // Split larger batches into chunks and dispatch them concurrently.
+        var chunkResults = await Task.WhenAll(
+            modList
+                .Chunk(MaxModsPerUpdateRequest)
+                .Select(chunk => GetModUpdatesChunkAsync(chunk, sptVersion, cancellationToken))
+        );
+
+        // Combine results across chunks.
+        var safeToUpdate = new List<SafeToUpdateMod>();
+        var blocked = new List<BlockedUpdateMod>();
+        var upToDate = new List<UpToDateMod>();
+        var incompatible = new List<IncompatibleMod>();
+        var anyData = false;
+
+        foreach (var chunkResult in chunkResults)
+        {
+            // A single chunk error fails the whole call.
+            if (chunkResult.TryPickT2(out var error, out _))
+            {
+                logger.LogDebug(
+                    "A mod-updates chunk failed ({Error}); failing the batch update request",
+                    error.Message
+                );
+                return error;
+            }
+
+            if (!chunkResult.TryPickT0(out var data, out _))
+            {
+                continue;
+            }
+
+            anyData = true;
+            if (data.SafeToUpdate is not null)
+            {
+                safeToUpdate.AddRange(data.SafeToUpdate);
+            }
+
+            if (data.Blocked is not null)
+            {
+                blocked.AddRange(data.Blocked);
+            }
+
+            if (data.UpToDate is not null)
+            {
+                upToDate.AddRange(data.UpToDate);
+            }
+
+            if (data.Incompatible is not null)
+            {
+                incompatible.AddRange(data.Incompatible);
+            }
+        }
+
+        if (!anyData)
+        {
+            // Every chunk succeeded but none carried data: report a clean miss.
+            return new NotFound();
+        }
+
+        return new ModUpdatesData(safeToUpdate, blocked, upToDate, incompatible);
+    }
+
+    /// <summary>
+    /// Retrieves batch update information for a single chunk of mods.
+    /// </summary>
+    private async Task<OneOf<ModUpdatesData, NotFound, ApiError>> GetModUpdatesChunkAsync(
+        IReadOnlyList<(int ModId, string CurrentVersion)> chunk,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            // Build mods query parameter as comma-separated "id:version" pairs
+            var modsParam = string.Join(",", chunk.Select(m => $"{m.ModId}:{Uri.EscapeDataString(m.CurrentVersion)}"));
+
+            var url = $"{_options.BaseUrl}mods/updates?mods={modsParam}&spt_version={sptVersion}";
+
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<ModUpdatesApiResponse>(response.Body, _jsonOptions);
+
+            if (apiResponse?.Success != true || apiResponse.Data is null)
+            {
+                return new NotFound();
+            }
+
+            return apiResponse.Data;
+        }
+        catch (HttpRequestException ex)
+        {
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+
+    /// <summary>
+    /// Retrieves dependency information for multiple mods in a single API call.
+    /// </summary>
+    /// <param name="modVersions">Collection of identifier (mod ID or GUID) and version pairs.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>Flattened dependency tree with recursive structure or an error.</returns>
+    public async Task<OneOf<List<ModDependency>, NotFound, ApiError>> GetModDependenciesAsync(
+        IEnumerable<(string Identifier, string Version)> modVersions,
+        SemanticVersioning.Version? sptVersion,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var modList = modVersions.ToList();
+        if (modList.Count == 0)
+        {
+            return new NotFound();
+        }
+
+        try
+        {
+            // Build mods query parameter as comma-separated "identifier:version" pairs
+            var modsParam = string.Join(
+                ",",
+                modList.Select(m => $"{Uri.EscapeDataString(m.Identifier)}:{Uri.EscapeDataString(m.Version)}")
+            );
+
+            // Forge requires spt_version alongside mods; without it every request is rejected with HTTP 400.
+            var url = sptVersion is null
+                ? $"{_options.BaseUrl}mods/dependencies?mods={modsParam}"
+                : $"{_options.BaseUrl}mods/dependencies?mods={modsParam}&spt_version={sptVersion}";
+
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            var dependencies = ParseDependencies(response.Body);
+            return dependencies is null ? new NotFound() : dependencies;
+        }
+        catch (HttpRequestException ex)
+        {
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+}

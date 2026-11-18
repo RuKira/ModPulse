@@ -1,0 +1,19 @@
+<Project>
+  <!-- Shared by every project in the repo (Core, CLI, GUI, tests). -->
+  <PropertyGroup>
+    <LangVersion>14</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ModPulse</RootNamespace>
+    <Authors>Ru Kira, Refringe</Authors>
+    <Copyright>Copyright (c) 2026 Ru Kira, Copyright (c) 2025 Refringe</Copyright>
+    <Product>ModPulse</Product>
+    <!--
+    Baseline semver for local/dev builds. Releases override this via -p:BuildVersion (from the git tag). Bump this when
+    preparing a new release so local builds report the in-progress version. Every assembly gets the same version, so
+    the Core library reports the same version as the exe that loads it.
+    -->
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <GenerateAssemblyInformationalVersionAttribute>false</GenerateAssemblyInformationalVersionAttribute>
+  </PropertyGroup>
+</Project>

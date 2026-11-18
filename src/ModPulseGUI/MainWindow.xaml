@@ -1,0 +1,771 @@
+<Window x:Class="ModPulse.Gui.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:ModPulse.Gui.ViewModels"
+        xmlns:svc="clr-namespace:ModPulse.Gui.Services"
+        Title="ModPulse"
+        MinWidth="1000" MinHeight="640"
+        Background="{DynamicResource Brush.Window}"
+        Foreground="{DynamicResource Brush.Text}"
+        FontFamily="{StaticResource Font.Ui}" FontSize="13"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        Icon="pack://application:,,,/ModPulseGUI;component/Assets/check-mods.ico">
+
+    <Window.InputBindings>
+        <KeyBinding Key="F5" Command="{Binding CheckCommand}" />
+        <KeyBinding Key="Escape" Command="{Binding CheckCancelCommand}" />
+    </Window.InputBindings>
+
+    <Window.Resources>
+        <!-- Status pill used in every grid and the details pane. -->
+        <DataTemplate x:Key="StatusPill" DataType="{x:Type vm:ModRowViewModel}">
+            <StackPanel Orientation="Horizontal">
+                <Border x:Name="Pill" CornerRadius="10" BorderThickness="1" Padding="8,1"
+                        BorderBrush="{DynamicResource Brush.TextDim}">
+                    <TextBlock x:Name="Txt" Text="{Binding StatusText}" FontSize="11.5" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Brush.TextMuted}" />
+                </Border>
+                <Border CornerRadius="10" BorderThickness="1" Padding="7,1" Margin="5,0,0,0"
+                        BorderBrush="{DynamicResource Brush.Legacy}"
+                        Visibility="{Binding IsLegacy, Converter={StaticResource HasValueToVisibility}}"
+                        ToolTip="Legacy SPT (below 3.11): the installed version is assumed to match your SPT, and only updates Forge confirms for your SPT version are offered.">
+                    <TextBlock Text="Legacy" FontSize="11.5" Foreground="{DynamicResource Brush.Legacy}" />
+                </Border>
+                <Border CornerRadius="10" BorderThickness="1" Padding="7,1" Margin="5,0,0,0"
+                        BorderBrush="{DynamicResource Brush.Info}" ToolTip="{Binding RelationText}"
+                        Visibility="{Binding RelationTag, Converter={StaticResource HasValueToVisibility}}">
+                    <TextBlock Text="{Binding RelationTag}" FontSize="11.5" Foreground="{DynamicResource Brush.Info}" />
+                </Border>
+            </StackPanel>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:ModStatusKind.Incompatible}">
+                    <Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Brush.Bad}" />
+                    <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource Brush.Bad}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:ModStatusKind.Update}">
+                    <Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Brush.Update}" />
+                    <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource Brush.Update}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:ModStatusKind.Blocked}">
+                    <Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Brush.Update}" />
+                    <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource Brush.Update}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:ModStatusKind.UpToDate}">
+                    <Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Brush.Ok}" />
+                    <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource Brush.Ok}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:ModStatusKind.Newer}">
+                    <Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Brush.Ok}" />
+                    <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource Brush.Ok}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:ModStatusKind.Bundled}">
+                    <Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Brush.Ok}" />
+                    <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource Brush.Ok}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="{x:Static vm:ModStatusKind.NotOnForge}">
+                    <Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Brush.Info}" />
+                    <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource Brush.Info}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- Activity log line. -->
+        <DataTemplate x:Key="LogLine" DataType="{x:Type vm:LogEntry}">
+            <Grid Margin="0,2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="64" />
+                    <ColumnDefinition Width="14" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource Brush.TextDim}"
+                           FontFamily="{StaticResource Font.Mono}" FontSize="12" />
+                <Ellipse x:Name="Dot" Grid.Column="1" Width="6" Height="6" VerticalAlignment="Center"
+                         Fill="{DynamicResource Brush.TextDim}" />
+                <TextBlock Grid.Column="2" Text="{Binding Text}" TextWrapping="Wrap"
+                           Foreground="{DynamicResource Brush.TextMuted}" />
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="{x:Static svc:RunLogLevel.Success}">
+                    <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ok}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="{x:Static svc:RunLogLevel.Warning}">
+                    <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Update}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="{x:Static svc:RunLogLevel.Error}">
+                    <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Bad}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- Overview stat tile; clicking it opens the matching tab. -->
+        <Style x:Key="StatTile" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{DynamicResource Brush.Surface}"
+                                BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="8"
+                                Padding="16,14">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="StatNumber" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="28" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        </Style>
+        <Style x:Key="StatLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+        </Style>
+
+        <!-- Empty-state text inside a tab. -->
+        <Style x:Key="EmptyText" TargetType="TextBlock" BasedOn="{StaticResource Text.Muted}">
+            <Setter Property="Margin" Value="4,8" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20,14,20,10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ================= Header: brand, folder, actions ================= -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,24,0">
+                <Path Data="M 0,12 L 6,12 L 9,3 L 14,21 L 18,8 L 21,12 L 28,12" Stroke="{DynamicResource Brush.Accent}"
+                      StrokeThickness="2.4" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      VerticalAlignment="Center" Margin="0,0,10,0" />
+                <TextBlock Text="ModPulse" Style="{StaticResource Text.Title}" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <Grid Grid.Column="1" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="PathBox" Text="{Binding GamePath, UpdateSourceTrigger=PropertyChanged}"
+                         Tag="Your SPT folder (the one with EscapeFromTarkov.exe)"
+                         AutomationProperties.Name="SPT folder" FontSize="13.5">
+                    <TextBox.InputBindings>
+                        <KeyBinding Key="Enter" Command="{Binding CheckCommand}" />
+                    </TextBox.InputBindings>
+                </TextBox>
+                <Button x:Name="RecentButton" Grid.Column="1" Margin="6,0,0,0" Padding="10,7" Content="Recent ▾"
+                        Click="RecentButton_Click" ToolTip="Recently checked installs"
+                        Visibility="{Binding RecentPaths.Count, Converter={StaticResource HasValueToVisibility}}">
+                    <Button.ContextMenu>
+                        <ContextMenu ItemsSource="{Binding RecentPaths}">
+                            <ContextMenu.ItemContainerStyle>
+                                <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                    <Setter Property="Header" Value="{Binding}" />
+                                    <Setter Property="Command"
+                                            Value="{Binding PlacementTarget.DataContext.UseRecentCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                    <Setter Property="CommandParameter" Value="{Binding}" />
+                                </Style>
+                            </ContextMenu.ItemContainerStyle>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+            </Grid>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center">
+                <Button Content="Browse…" Command="{Binding BrowseCommand}" Margin="0,0,8,0" />
+                <Button Content="Check mods" Command="{Binding CheckCommand}" Style="{StaticResource Button.Primary}"
+                        MinWidth="120" ToolTip="Check this install (F5)"
+                        Visibility="{Binding IsRunning, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
+                <Button Content="Cancel" Command="{Binding CheckCancelCommand}" MinWidth="120" ToolTip="Stop the check (Esc)"
+                        Visibility="{Binding IsRunning, Converter={StaticResource HasValueToVisibility}}" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,10,0,0">
+                <CheckBox Content="Fresh from Forge" IsChecked="{Binding RefreshFromForge}" Margin="0,0,20,0"
+                          ToolTip="Ignore cached Forge answers for this check (slower). Fresh answers are still saved for next time." />
+                <CheckBox Content="Fetch the latest community ignore list" IsChecked="{Binding FetchCommunityIgnores}"
+                          ToolTip="The community list of known version mismatches (mods whose DLL reports an older version than their Forge release) is built into ModPulse and always applies. Tick this to also download entries added since this build." />
+            </StackPanel>
+        </Grid>
+
+        <!-- ================= Install summary chips ================= -->
+        <Grid Grid.Row="1" Margin="0,14,0,0"
+              Visibility="{Binding HasInstallInfo, Converter={StaticResource HasValueToVisibility}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <WrapPanel>
+                <Border Style="{StaticResource Chip}">
+                    <TextBlock Text="{Binding SptVersionText}" FontWeight="SemiBold" />
+                </Border>
+                <Border Style="{StaticResource Chip}">
+                    <TextBlock Text="{Binding ServerFolderText}" Foreground="{DynamicResource Brush.TextMuted}" />
+                </Border>
+                <Border Style="{StaticResource Chip}" BorderBrush="{DynamicResource Brush.Legacy}"
+                        Visibility="{Binding IsLegacy, Converter={StaticResource HasValueToVisibility}}"
+                        ToolTip="SPT below 3.11 is Legacy: mods are assumed to match your SPT, and only updates Forge confirms for your exact SPT version are offered.">
+                    <TextBlock Text="Legacy SPT" Foreground="{DynamicResource Brush.Legacy}" />
+                </Border>
+                <Border Style="{StaticResource Chip}" BorderBrush="{DynamicResource Brush.Update}"
+                        Visibility="{Binding SptUpdateText, Converter={StaticResource HasValueToVisibility}}">
+                    <Button Style="{StaticResource Button.Link}" Content="{Binding SptUpdateText}"
+                            Foreground="{DynamicResource Brush.Update}"
+                            Command="{Binding OpenUrlCommand}" CommandParameter="{Binding SptUpdateUrl}" />
+                </Border>
+                <Border Style="{StaticResource Chip}" BorderBrush="{DynamicResource Brush.Accent}"
+                        Visibility="{Binding ModPulseUpdateText, Converter={StaticResource HasValueToVisibility}}">
+                    <Button Style="{StaticResource Button.Link}" Content="{Binding ModPulseUpdateText}"
+                            Command="{Binding OpenUrlCommand}" CommandParameter="{Binding ModPulseUpdateUrl}" />
+                </Border>
+            </WrapPanel>
+            <TextBlock Grid.Column="1" Text="{Binding LastCheckedText}" Foreground="{DynamicResource Brush.TextDim}"
+                       VerticalAlignment="Center" />
+        </Grid>
+
+        <!-- ================= Main content ================= -->
+        <Grid Grid.Row="2" Margin="0,16,0,0">
+
+            <!-- Welcome -->
+            <Border Style="{StaticResource Card}" MaxWidth="640" VerticalAlignment="Center" Padding="28,24"
+                    Visibility="{Binding State, Converter={StaticResource EqualsToVisibility}, ConverterParameter=Welcome}">
+                <StackPanel>
+                    <TextBlock Text="Check your SPT mods" Style="{StaticResource Text.Title}" />
+                    <TextBlock Style="{StaticResource Text.Muted}" Margin="0,10,0,0" FontSize="14" LineHeight="21">
+                        Pick your SPT folder and press <Bold>Check mods</Bold>. ModPulse reads your installed server
+                        and client mods, asks the Forge about updates and compatibility, and checks dependencies.
+                        It never changes your files.
+                    </TextBlock>
+                    <TextBlock Style="{StaticResource Text.Muted}" Margin="0,14,0,0">
+                        Supports SPT 3.9 to 4.1. Installs below 3.11 are checked as Legacy.
+                    </TextBlock>
+                    <Button Content="Choose SPT folder…" Command="{Binding BrowseCommand}" HorizontalAlignment="Left"
+                            Margin="0,20,0,0" Style="{StaticResource Button.Primary}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Running -->
+            <Grid Visibility="{Binding State, Converter={StaticResource EqualsToVisibility}, ConverterParameter=Running}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border Style="{StaticResource Card}" Padding="22,18">
+                    <StackPanel>
+                        <TextBlock Text="{Binding StageTitle}" Style="{StaticResource Text.Section}" FontSize="17" />
+                        <Grid Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ProgressBar Value="{Binding ProgressValue, Mode=OneWay}" Maximum="{Binding ProgressTotal}"
+                                         IsIndeterminate="{Binding IsProgressIndeterminate, Mode=OneWay}"
+                                         VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Text="{Binding ProgressText}" Margin="12,0,0,0" MinWidth="70"
+                                       TextAlignment="Right" Foreground="{DynamicResource Brush.TextMuted}"
+                                       FontFamily="{StaticResource Font.Mono}" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource Text.Muted}" Margin="0,12,0,0" FontSize="12"
+                                   Text="The Forge limits how fast it answers, so a first check can take a few minutes. Repeat checks use the cache and take seconds." />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,12,0,0">
+                    <ListBox x:Name="RunningLog" ItemsSource="{Binding Activity}" ItemTemplate="{StaticResource LogLine}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                </Border>
+            </Grid>
+
+            <!-- Stopped early -->
+            <Grid Visibility="{Binding State, Converter={StaticResource EqualsToVisibility}, ConverterParameter=Stopped}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border Style="{StaticResource Card}" BorderBrush="{DynamicResource Brush.Bad}" Padding="22,18">
+                    <StackPanel>
+                        <TextBlock Text="Check stopped" Style="{StaticResource Text.Section}" />
+                        <TextBlock Text="{Binding StoppedMessage}" Style="{StaticResource Text.Muted}" Margin="0,8,0,0" FontSize="14" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,12,0,0"
+                        Visibility="{Binding Activity.Count, Converter={StaticResource HasValueToVisibility}}">
+                    <ListBox ItemsSource="{Binding Activity}" ItemTemplate="{StaticResource LogLine}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                </Border>
+            </Grid>
+
+            <!-- Results -->
+            <Grid Visibility="{Binding State, Converter={StaticResource EqualsToVisibility}, ConverterParameter=Results}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TabControl SelectedIndex="{Binding SelectedTabIndex}">
+
+                    <!-- Overview -->
+                    <TabItem Header="Overview">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="{Binding Headline}" Style="{StaticResource Text.Title}" FontSize="18"
+                                       TextWrapping="Wrap" Margin="2,0,0,14" />
+                            <UniformGrid Grid.Row="1" Rows="1" Margin="0,0,-12,0">
+                                <Button Style="{StaticResource StatTile}" Command="{Binding SelectTabCommand}" CommandParameter="6">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding AllMods.Count}" Style="{StaticResource StatNumber}" />
+                                        <TextBlock Text="Mods" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource StatTile}" Command="{Binding SelectTabCommand}" CommandParameter="1">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Updates.Count}" Style="{StaticResource StatNumber}"
+                                                   Foreground="{DynamicResource Brush.Update}" />
+                                        <TextBlock Text="Updates" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource StatTile}" Command="{Binding SelectTabCommand}" CommandParameter="2">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Incompatible.Count}" Style="{StaticResource StatNumber}"
+                                                   Foreground="{DynamicResource Brush.Bad}" />
+                                        <TextBlock Text="Incompatible" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource StatTile}" Command="{Binding SelectTabCommand}" CommandParameter="3">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding DependencyIssueCount}" Style="{StaticResource StatNumber}" />
+                                        <TextBlock Text="Dependency issues" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource StatTile}" Command="{Binding SelectTabCommand}" CommandParameter="4">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding NotOnForge.Count}" Style="{StaticResource StatNumber}"
+                                                   Foreground="{DynamicResource Brush.Info}" />
+                                        <TextBlock Text="Not on Forge" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource StatTile}" Command="{Binding SelectTabCommand}" CommandParameter="5">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Problems.Count}" Style="{StaticResource StatNumber}" />
+                                        <TextBlock Text="Install notes" Style="{StaticResource StatLabel}" />
+                                    </StackPanel>
+                                </Button>
+                            </UniformGrid>
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,14,0,0">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Activity" Style="{StaticResource Text.Section}" Margin="0,0,0,8" />
+                                    <ListBox ItemsSource="{Binding Activity}" ItemTemplate="{StaticResource LogLine}"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- Updates -->
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock><Run Text="Updates" /> <Run Text="{Binding Updates.Count, Mode=OneWay}" Foreground="{DynamicResource Brush.TextDim}" /></TextBlock>
+                        </TabItem.Header>
+                        <DockPanel>
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                                <Button DockPanel.Dock="Right" Content="Open all update pages"
+                                        Command="{Binding OpenAllUpdatePagesCommand}" />
+                                <TextBlock Style="{StaticResource Text.Muted}" VerticalAlignment="Center" Margin="2,0,16,0">
+                                    <Run Text="Use" /> <Run Text="Ignore" FontWeight="SemiBold" /> <Run Text="when Forge's newer version is the files you already have (the mod's DLL just reports an old version)." />
+                                    <Run Text="{Binding IgnoredCount, Mode=OneWay, StringFormat='{}{0} ignored (see All mods).'}" Foreground="{DynamicResource Brush.TextDim}" />
+                                </TextBlock>
+                            </DockPanel>
+                            <Grid>
+                                <TextBlock Text="No updates. Everything matched on the Forge is current." Style="{StaticResource EmptyText}"
+                                           Visibility="{Binding Updates.Count, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
+                                <DataGrid ItemsSource="{Binding Updates}" SelectedItem="{Binding SelectedMod}"
+                                          Visibility="{Binding Updates.Count, Converter={StaticResource HasValueToVisibility}}">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="MOD" Binding="{Binding Name}" Width="2*" />
+                                        <DataGridTextColumn Header="AUTHOR" Binding="{Binding Author}" Width="*" />
+                                        <DataGridTextColumn Header="INSTALLED" Binding="{Binding InstalledVersion}" Width="90" />
+                                        <DataGridTextColumn Header="LATEST" Binding="{Binding LatestVersion}" Width="90" />
+                                        <DataGridTemplateColumn Header="STATUS" Width="150" SortMemberPath="StatusKind"
+                                                                CellTemplate="{StaticResource StatusPill}" />
+                                        <DataGridTemplateColumn Header="" Width="240">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Button Style="{StaticResource Button.Small}" Content="Download" Margin="0,0,6,0"
+                                                                Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding DownloadUrl}"
+                                                                Visibility="{Binding DownloadUrl, Converter={StaticResource HasValueToVisibility}}" />
+                                                        <Button Style="{StaticResource Button.Small}" Content="Forge page" Margin="0,0,6,0"
+                                                                Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding ForgeUrl}" />
+                                                        <Button Style="{StaticResource Button.Small}" Content="Ignore"
+                                                                Visibility="{Binding CanIgnore, Converter={StaticResource HasValueToVisibility}}"
+                                                                ToolTip="Mark this update as a false positive: the newer Forge version is the files you already have."
+                                                                Command="{Binding DataContext.IgnoreUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </DockPanel>
+                    </TabItem>
+
+                    <!-- Incompatible -->
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock><Run Text="Incompatible" /> <Run Text="{Binding Incompatible.Count, Mode=OneWay}" Foreground="{DynamicResource Brush.TextDim}" /></TextBlock>
+                        </TabItem.Header>
+                        <Grid>
+                            <TextBlock Text="No compatibility problems. Every matched mod supports your SPT version." Style="{StaticResource EmptyText}"
+                                       Visibility="{Binding Incompatible.Count, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
+                            <DataGrid ItemsSource="{Binding Incompatible}" SelectedItem="{Binding SelectedMod}" RowHeight="NaN"
+                                      Visibility="{Binding Incompatible.Count, Converter={StaticResource HasValueToVisibility}}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="MOD" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="INSTALLED" Binding="{Binding InstalledVersion}" Width="90" />
+                                    <DataGridTemplateColumn Header="WHY" Width="2*">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Reason}" TextWrapping="Wrap" Margin="0,8"
+                                                           Foreground="{DynamicResource Brush.TextMuted}" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="" Width="230">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button Style="{StaticResource Button.Small}" Margin="0,0,6,0"
+                                                            Content="{Binding CompatibleVersion}" ContentStringFormat="Get {0}"
+                                                            Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding DownloadUrl}"
+                                                            Visibility="{Binding DownloadUrl, Converter={StaticResource HasValueToVisibility}}" />
+                                                    <Button Style="{StaticResource Button.Small}" Content="Forge page"
+                                                            Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding ForgeUrl}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- Dependencies -->
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock><Run Text="Dependencies" /> <Run Text="{Binding DependencyIssueCount, Mode=OneWay}" Foreground="{DynamicResource Brush.TextDim}" /></TextBlock>
+                        </TabItem.Header>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <TextBlock Text="Missing" Style="{StaticResource Text.Section}" Margin="2,0,0,8" />
+                                    <TextBlock Text="Nothing missing. Every required mod is installed." Style="{StaticResource EmptyText}"
+                                               Visibility="{Binding MissingDependencies.Count, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
+                                    <ItemsControl ItemsSource="{Binding MissingDependencies}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:MissingDependencyItem}">
+                                                <Border Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,8"
+                                                        BorderBrush="{DynamicResource Brush.Bad}">
+                                                    <DockPanel>
+                                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <Button Style="{StaticResource Button.Small}" Content="Download" Margin="0,0,6,0"
+                                                                    Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding DownloadUrl}"
+                                                                    Visibility="{Binding DownloadUrl, Converter={StaticResource HasValueToVisibility}}" />
+                                                            <Button Style="{StaticResource Button.Small}" Content="Forge page"
+                                                                    Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                    CommandParameter="{Binding ForgeUrl}" />
+                                                        </StackPanel>
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                            <TextBlock Foreground="{DynamicResource Brush.TextMuted}" Text="{Binding Version, StringFormat='Needs version {0}'}" />
+                                                        </StackPanel>
+                                                    </DockPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <TextBlock Text="Version conflicts" Style="{StaticResource Text.Section}" Margin="2,16,0,8" />
+                                    <TextBlock Text="No conflicts." Style="{StaticResource EmptyText}"
+                                               Visibility="{Binding DependencyConflicts.Count, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
+                                    <ItemsControl ItemsSource="{Binding DependencyConflicts}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:DependencyConflictItem}">
+                                                <Border Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,8"
+                                                        BorderBrush="{DynamicResource Brush.Update}">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding ModName}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Description}" Style="{StaticResource Text.Muted}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <DockPanel Grid.Column="2">
+                                <TextBlock DockPanel.Dock="Top" Text="Dependency tree" Style="{StaticResource Text.Section}" Margin="2,0,0,8" />
+                                <TextBlock DockPanel.Dock="Top" Style="{StaticResource Text.Muted}" FontSize="12" Margin="2,0,0,8"
+                                           Text="Mods that depend on other mods. Mods with no dependencies aren't listed." />
+                                <TreeView ItemsSource="{Binding DependencyTree}">
+                                    <TreeView.ItemTemplate>
+                                        <HierarchicalDataTemplate DataType="{x:Type vm:DependencyNodeItem}" ItemsSource="{Binding Children}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock x:Name="N" Text="{Binding Name}" />
+                                                <TextBlock Text="{Binding Version}" Margin="8,0,0,0" Foreground="{DynamicResource Brush.TextDim}" />
+                                                <TextBlock Text="{Binding StateText}" Margin="8,0,0,0" Foreground="{DynamicResource Brush.Bad}" />
+                                            </StackPanel>
+                                            <HierarchicalDataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsInstalled}" Value="False">
+                                                    <Setter TargetName="N" Property="Foreground" Value="{DynamicResource Brush.Bad}" />
+                                                </DataTrigger>
+                                            </HierarchicalDataTemplate.Triggers>
+                                        </HierarchicalDataTemplate>
+                                    </TreeView.ItemTemplate>
+                                </TreeView>
+                            </DockPanel>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- Not on Forge -->
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock><Run Text="Not on Forge" /> <Run Text="{Binding NotOnForge.Count, Mode=OneWay}" Foreground="{DynamicResource Brush.TextDim}" /></TextBlock>
+                        </TabItem.Header>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Text.Muted}" Margin="2,0,0,10"
+                                       Text="ModPulse couldn't find these on the Forge, so it can't check them for updates or compatibility. Usually the mod isn't published there, or both its GUID and name differ from the Forge listing. Addons and plugins bundled with another mod are recognized and listed under All mods." />
+                            <Grid>
+                                <TextBlock Text="Every mod was found on the Forge." Style="{StaticResource EmptyText}"
+                                           Visibility="{Binding NotOnForge.Count, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
+                                <DataGrid ItemsSource="{Binding NotOnForge}" SelectedItem="{Binding SelectedMod}"
+                                          Visibility="{Binding NotOnForge.Count, Converter={StaticResource HasValueToVisibility}}">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="MOD" Binding="{Binding Name}" Width="2*" />
+                                        <DataGridTextColumn Header="AUTHOR" Binding="{Binding Author}" Width="*" />
+                                        <DataGridTextColumn Header="VERSION" Binding="{Binding InstalledVersion}" Width="90" />
+                                        <DataGridTextColumn Header="SIDE" Binding="{Binding Side}" Width="110" />
+                                        <DataGridTextColumn Header="GUID" Binding="{Binding Guid}" Width="2*" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </DockPanel>
+                    </TabItem>
+
+                    <!-- Install notes -->
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock><Run Text="Install notes" /> <Run Text="{Binding Problems.Count, Mode=OneWay}" Foreground="{DynamicResource Brush.TextDim}" /></TextBlock>
+                        </TabItem.Header>
+                        <Grid>
+                            <TextBlock Text="No install problems found." Style="{StaticResource EmptyText}"
+                                       Visibility="{Binding Problems.Count, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding Problems}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:ProblemItem}">
+                                            <Border x:Name="Card" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,8">
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" Style="{StaticResource Button.Small}" Content="Show in folder"
+                                                            VerticalAlignment="Center" Margin="12,0,0,0"
+                                                            Command="{Binding DataContext.ShowInExplorerCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding Path}"
+                                                            Visibility="{Binding Path, Converter={StaticResource HasValueToVisibility}}" />
+                                                    <StackPanel>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Border CornerRadius="10" BorderThickness="1" Padding="8,1" Margin="0,0,8,0"
+                                                                    BorderBrush="{DynamicResource Brush.TextDim}" x:Name="KindPill">
+                                                                <TextBlock x:Name="KindText" Text="{Binding KindText}" FontSize="11.5"
+                                                                           Foreground="{DynamicResource Brush.TextMuted}" />
+                                                            </Border>
+                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding Detail}" Style="{StaticResource Text.Muted}" Margin="0,6,0,0" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsSevere}" Value="True">
+                                                    <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Bad}" />
+                                                    <Setter TargetName="KindPill" Property="BorderBrush" Value="{DynamicResource Brush.Bad}" />
+                                                    <Setter TargetName="KindText" Property="Foreground" Value="{DynamicResource Brush.Bad}" />
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- All mods -->
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock><Run Text="All mods" /> <Run Text="{Binding AllMods.Count, Mode=OneWay}" Foreground="{DynamicResource Brush.TextDim}" /></TextBlock>
+                        </TabItem.Header>
+                        <DockPanel>
+                            <TextBox x:Name="FilterBox" DockPanel.Dock="Top" Margin="0,0,0,10" MaxWidth="420" HorizontalAlignment="Left"
+                                     Width="420" Tag="Filter by name, author, GUID or status (Ctrl+F)"
+                                     AutomationProperties.Name="Filter mods"
+                                     Text="{Binding ModFilter, UpdateSourceTrigger=PropertyChanged}" />
+                            <DataGrid ItemsSource="{Binding AllModsView}" SelectedItem="{Binding SelectedMod}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="MOD" Binding="{Binding Name}" Width="2*" />
+                                    <DataGridTextColumn Header="AUTHOR" Binding="{Binding Author}" Width="*" />
+                                    <DataGridTextColumn Header="SIDE" Binding="{Binding Side}" Width="110" />
+                                    <DataGridTextColumn Header="INSTALLED" Binding="{Binding InstalledVersion}" Width="90" />
+                                    <DataGridTextColumn Header="LATEST" Binding="{Binding LatestVersion}" Width="90" />
+                                    <DataGridTemplateColumn Header="STATUS" Width="170" SortMemberPath="StatusKind"
+                                                            CellTemplate="{StaticResource StatusPill}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </TabItem>
+                </TabControl>
+
+                <!-- Details pane -->
+                <Border Grid.Column="1" Width="340" Margin="16,0,0,0" Style="{StaticResource Card}" Padding="18,16"
+                        Visibility="{Binding SelectedMod, Converter={StaticResource HasValueToVisibility}}">
+                    <DockPanel DataContext="{Binding SelectedMod}">
+                        <Grid DockPanel.Dock="Top">
+                            <TextBlock Text="{Binding Name}" Style="{StaticResource Text.Section}" FontSize="16"
+                                       TextWrapping="Wrap" Margin="0,0,28,0" />
+                            <Button HorizontalAlignment="Right" VerticalAlignment="Top" Padding="6,2" Content="✕"
+                                    ToolTip="Close" Click="CloseDetails_Click" />
+                        </Grid>
+                        <StackPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
+                            <WrapPanel>
+                                <Button Style="{StaticResource Button.Small}" Content="Download" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding DownloadUrl}"
+                                        Visibility="{Binding DownloadUrl, Converter={StaticResource HasValueToVisibility}}" />
+                                <Button Style="{StaticResource Button.Small}" Content="Forge page" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding ForgeUrl}"
+                                        Visibility="{Binding ForgeUrl, Converter={StaticResource HasValueToVisibility}}" />
+                                <Button Style="{StaticResource Button.Small}" Content="Source code" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding SourceCodeUrl}"
+                                        Visibility="{Binding SourceCodeUrl, Converter={StaticResource HasValueToVisibility}}" />
+                                <Button Style="{StaticResource Button.Small}" Content="Show in folder" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.ShowInExplorerCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding FilePath}" />
+                                <Button Style="{StaticResource Button.Small}" Content="Ignore update" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.IgnoreUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"
+                                        Visibility="{Binding CanIgnore, Converter={StaticResource HasValueToVisibility}}" />
+                                <Button Style="{StaticResource Button.Small}" Content="Stop ignoring" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.UnignoreUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"
+                                        Visibility="{Binding CanUnignore, Converter={StaticResource HasValueToVisibility}}" />
+                            </WrapPanel>
+                        </StackPanel>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
+                            <StackPanel>
+                                <ContentControl Content="{Binding}" ContentTemplate="{StaticResource StatusPill}" HorizontalAlignment="Left" />
+                                <TextBlock Text="{Binding Reason}" Style="{StaticResource Text.Value}" Margin="0,8,0,0" />
+                                <TextBlock Text="{Binding UpdateDependencyNote}" Style="{StaticResource Text.Muted}" Margin="0,6,0,0"
+                                           Visibility="{Binding UpdateDependencyNote, Converter={StaticResource HasValueToVisibility}}" />
+
+                                <TextBlock Text="BELONGS TO" Style="{StaticResource Text.Label}"
+                                           Visibility="{Binding RelationText, Converter={StaticResource HasValueToVisibility}}" />
+                                <TextBlock Text="{Binding RelationText}" Style="{StaticResource Text.Value}"
+                                           Visibility="{Binding RelationText, Converter={StaticResource HasValueToVisibility}}" />
+
+                                <TextBlock Text="AUTHOR" Style="{StaticResource Text.Label}" />
+                                <TextBlock Text="{Binding Author}" Style="{StaticResource Text.Value}" />
+
+                                <TextBlock Text="VERSIONS" Style="{StaticResource Text.Label}" />
+                                <TextBlock Style="{StaticResource Text.Value}">
+                                    <Run Text="Installed" Foreground="{DynamicResource Brush.TextMuted}" /> <Run Text="{Binding InstalledVersion, Mode=OneWay}" />
+                                    <Run Text="  ·  Latest" Foreground="{DynamicResource Brush.TextMuted}" /> <Run Text="{Binding LatestVersion, Mode=OneWay}" />
+                                </TextBlock>
+                                <TextBlock Style="{StaticResource Text.Muted}" FontSize="12"
+                                           Visibility="{Binding InstalledSptConstraint, Converter={StaticResource HasValueToVisibility}}"
+                                           Text="{Binding InstalledSptConstraint, StringFormat='Installed version is built for SPT {0}'}" />
+
+                                <TextBlock Text="SIDE" Style="{StaticResource Text.Label}" />
+                                <TextBlock Text="{Binding Side}" Style="{StaticResource Text.Value}" />
+
+                                <TextBlock Text="GUID" Style="{StaticResource Text.Label}" />
+                                <TextBox Text="{Binding Guid, Mode=OneWay}" IsReadOnly="True" Padding="6,4"
+                                         FontFamily="{StaticResource Font.Mono}" FontSize="12" />
+
+                                <TextBlock Text="FILE" Style="{StaticResource Text.Label}" />
+                                <TextBlock Text="{Binding FilePath}" Style="{StaticResource Text.Muted}" FontSize="12" />
+                                <TextBlock Text="{Binding PairedFilePath}" Style="{StaticResource Text.Muted}" FontSize="12" Margin="0,4,0,0"
+                                           Visibility="{Binding PairedFilePath, Converter={StaticResource HasValueToVisibility}}" />
+
+                                <TextBlock Text="LEGACY" Style="{StaticResource Text.Label}"
+                                           Visibility="{Binding LegacyNote, Converter={StaticResource HasValueToVisibility}}" />
+                                <TextBlock Text="{Binding LegacyNote}" Style="{StaticResource Text.Muted}"
+                                           Visibility="{Binding LegacyNote, Converter={StaticResource HasValueToVisibility}}" />
+
+                                <TextBlock Text="LOAD WARNINGS" Style="{StaticResource Text.Label}"
+                                           Visibility="{Binding LoadWarnings, Converter={StaticResource HasValueToVisibility}}" />
+                                <ItemsControl ItemsSource="{Binding LoadWarnings}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" Style="{StaticResource Text.Muted}" Margin="0,0,0,4" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- ================= Footer ================= -->
+        <DockPanel Grid.Row="3" Margin="0,12,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Style="{StaticResource Button.Link}" Content="Copy summary" Margin="0,0,18,0"
+                        Command="{Binding CopySummaryCommand}"
+                        ToolTip="Copy a Markdown summary (for Discord or a bug report)"
+                        Visibility="{Binding State, Converter={StaticResource EqualsToVisibility}, ConverterParameter=Results}" />
+                <Button Style="{StaticResource Button.Link}" Content="Open log" Margin="0,0,18,0" Command="{Binding OpenLogFolderCommand}" />
+                <Button Style="{StaticResource Button.Link}" Content="Clear Forge cache" Command="{Binding ClearCacheCommand}" />
+            </StackPanel>
+            <TextBlock Text="{Binding AppVersionText}" Foreground="{DynamicResource Brush.TextDim}" FontSize="12" VerticalAlignment="Center" />
+        </DockPanel>
+    </Grid>
+</Window>
