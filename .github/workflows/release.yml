@@ -1,0 +1,85 @@
+# Builds ModPulseCLI and ModPulseGUI and publishes a GitHub release when a version tag is pushed.
+#
+#   git tag -s v1.0.1 -m "ModPulse 1.0.1"
+#   git push origin v1.0.1
+#
+# Tags with a suffix (v1.1.0-beta.1) are published as pre-releases.
+#
+# Optional secret GUI_COLORS_XAML: the full contents of src/ModPulseGUI/Themes/Colors.local.xaml. When set, the GUI is
+# built with that palette; otherwise it uses the neutral Colors.default.xaml from the repo.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Read version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v', 'V')
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "Tag '$tag' is not a version like v1.2.3 or v1.2.3-beta.1"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$($version.Contains('-').ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
+      - name: Add the GUI palette (optional)
+        shell: pwsh
+        env:
+          COLORS: ${{ secrets.GUI_COLORS_XAML }}
+        run: |
+          if ($env:COLORS) {
+            Set-Content -Path src/ModPulseGUI/Themes/Colors.local.xaml -Value $env:COLORS -Encoding utf8
+            "Using the palette from the GUI_COLORS_XAML secret."
+          } else {
+            "No GUI_COLORS_XAML secret; using Colors.default.xaml."
+          }
+
+      - name: Test
+        run: dotnet test ModPulse.slnx -c Release
+
+      - name: Publish ModPulseCLI
+        run: >
+          dotnet publish src/ModPulseCLI/ModPulseCLI.csproj -c Release -r win-x64
+          -p:BuildVersion=${{ steps.version.outputs.version }} -o release
+
+      - name: Publish ModPulseGUI
+        run: >
+          dotnet publish src/ModPulseGUI/ModPulseGUI.csproj -c Release -r win-x64
+          -p:BuildVersion=${{ steps.version.outputs.version }} -o release
+
+      - name: Create the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ghArgs = @(
+            "release", "create", "${{ github.ref_name }}",
+            "release/ModPulseCLI-win-x64.zip",
+            "release/ModPulseGUI-win-x64.zip",
+            "--title", "ModPulse ${{ steps.version.outputs.version }}",
+            "--generate-notes",
+            "--verify-tag"
+          )
+          if ("${{ steps.version.outputs.prerelease }}" -eq "true") { $ghArgs += "--prerelease" }
+          gh @ghArgs

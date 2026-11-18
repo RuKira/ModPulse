@@ -70,6 +70,23 @@ Layout: `src/ModPulse.Core` (all checking logic), `src/ModPulseCLI`, `src/ModPul
 The GUI's colors come from `src/ModPulseGUI/Themes/Colors.default.xaml`. A personal palette with the same keys can go in
 `Themes/Colors.local.xaml` (gitignored); when that file exists it is compiled in and used instead.
 
+## Releasing
+
+Push a version tag; GitHub Actions (`.github/workflows/release.yml`) does the rest:
+
+```
+git tag -s v1.0.1 -m "ModPulse 1.0.1"
+git push origin v1.0.1
+```
+
+The workflow runs the tests, publishes both exes stamped with the tag's version, and creates a GitHub release with
+`ModPulseCLI-win-x64.zip` and `ModPulseGUI-win-x64.zip` attached and auto-generated notes. A tag with a suffix
+(`v1.1.0-beta.1`) becomes a pre-release. The self-update check reads the latest release's tag, so tags must look like
+`v1.2.3`.
+
+The GUI palette for release builds comes from the repository secret `GUI_COLORS_XAML` (the full contents of a
+`Colors.local.xaml`). Without the secret, releases use the neutral `Colors.default.xaml`.
+
 ## Identity
 
 `src/ModPulse.Core/Configuration/AppIdentity.cs` holds the name, GUID and GitHub owner/repo used for self-update checks (GitHub
