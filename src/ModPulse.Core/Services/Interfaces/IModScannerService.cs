@@ -41,6 +41,12 @@ public interface IModScannerService
     string? GetSptVersion(string sptPath);
 
     /// <summary>
+    /// GUIDs of the plugins SPT itself ships in BepInEx/plugins/spt (core, custom, ConfigurationManager…). They are
+    /// always installed, so dependencies on them are satisfied.
+    /// </summary>
+    IReadOnlyList<string> GetBuiltInPluginGuids(string sptPath);
+
+    /// <summary>
     /// Detects mods installed in the wrong location.
     /// </summary>
     /// <param name="sptPath">Path to the SPT installation directory.</param>

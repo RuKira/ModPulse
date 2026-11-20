@@ -12,8 +12,11 @@ public interface ISptInstallationService
     /// </summary>
     /// <param name="sptPath">Path to the SPT installation directory.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
-    /// <returns>Validated SPT version or null if validation fails.</returns>
-    Task<SemanticVersioning.Version?> GetAndValidateSptVersionAsync(
+    /// <returns>
+    /// The installed version and the version to use for Forge queries (a same-minor stand-in when the Forge doesn't list
+    /// the installed patch), or null if validation fails.
+    /// </returns>
+    Task<SptVersionCheck?> GetAndValidateSptVersionAsync(
         string sptPath,
         CancellationToken cancellationToken = default
     );

@@ -42,9 +42,17 @@ public sealed class AssemblyResolver(string dllPath) : MetadataAssemblyResolver
         var gameRoot = FindGameRoot(dllPath);
         if (gameRoot != null)
         {
-            // The game's Managed folder supplies mscorlib/netstandard. This is what makes client scanning work in a
-            // self-contained single-file build, where the .NET runtime assemblies are bundled inside the exe and are
-            // not on disk.
+            // The plugin's own mod folder (with subfolders), so a plugin built on a sibling DLL resolves it:
+            // GamePanelHUD's Compass/Health/... plugins derive from core/GamePanelHUDCore.dll.
+            var modFolder = FindModFolder(dllPath, Path.Combine(gameRoot, "BepInEx", "plugins"));
+            if (modFolder is not null)
+            {
+                AddDlls(assemblyPaths, modFolder, SearchOption.AllDirectories);
+            }
+
+            // The game's Managed folder supplies mscorlib/netstandard (the Mono core library plugins are built
+            // against). It is also what makes scanning work in a self-contained single-file build, where the .NET
+            // runtime assemblies are inside the exe rather than on disk.
             AddDlls(assemblyPaths, Path.Combine(gameRoot, "EscapeFromTarkov_Data", "Managed"));
             AddDlls(assemblyPaths, Path.Combine(gameRoot, "BepInEx", "core"));
         }
@@ -53,14 +61,50 @@ public sealed class AssemblyResolver(string dllPath) : MetadataAssemblyResolver
         // is the exe's folder and holds no runtime assemblies.
         AddDlls(assemblyPaths, RuntimeEnvironment.GetRuntimeDirectory());
 
-        return assemblyPaths.Distinct(StringComparer.OrdinalIgnoreCase);
+        // One file per assembly name, earlier sources first. Two files with the same identity (the game's Mono
+        // mscorlib and .NET's mscorlib facade are both "mscorlib, 4.0.0.0") make MetadataLoadContext fail with
+        // "already loaded", which made every plugin touching mscorlib/netstandard unreadable.
+        return assemblyPaths
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .GroupBy(p => Path.GetFileNameWithoutExtension(p), StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
     }
 
-    private static void AddDlls(List<string> assemblyPaths, string directory)
+    /// <summary>The mod folder a plugin DLL lives in (the direct child of BepInEx/plugins), or null for a loose DLL.</summary>
+    private static string? FindModFolder(string dllPath, string pluginsDir)
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(dllPath));
+        var plugins = Path.GetFullPath(pluginsDir).TrimEnd(Path.DirectorySeparatorChar);
+
+        while (!string.IsNullOrEmpty(directory))
+        {
+            var parent = Path.GetDirectoryName(directory);
+            if (string.Equals(directory, plugins, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (string.Equals(parent, plugins, StringComparison.OrdinalIgnoreCase))
+            {
+                return directory;
+            }
+
+            directory = parent;
+        }
+
+        return null;
+    }
+
+    private static void AddDlls(
+        List<string> assemblyPaths,
+        string directory,
+        SearchOption searchOption = SearchOption.TopDirectoryOnly
+    )
     {
         if (Directory.Exists(directory))
         {
-            assemblyPaths.AddRange(Directory.GetFiles(directory, "*.dll"));
+            assemblyPaths.AddRange(Directory.GetFiles(directory, "*.dll", searchOption));
         }
     }
 

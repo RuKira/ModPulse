@@ -223,6 +223,37 @@ public sealed partial class ForgeApiService(
     /// </summary>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>List of all available SPT versions or an error.</returns>
+    public async Task<OneOf<List<SptVersionResult>, ApiError>> GetSptVersionsInMinorAsync(
+        int major,
+        int minor,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var range = Uri.EscapeDataString($"~{major}.{minor}.0");
+            var url = $"{_options.BaseUrl}spt/versions?filter[spt_version]={range}&per_page=50";
+            var response = await GetJsonAsync(url, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new ApiError($"API returned status {response.StatusCode}", (int)response.StatusCode);
+            }
+
+            var apiResponse = JsonSerializer.Deserialize<SptVersionApiResponse>(response.Body, _jsonOptions);
+            return apiResponse is { Success: true, Data: not null } ? apiResponse.Data : [];
+        }
+        catch (HttpRequestException ex)
+        {
+            return new ApiError("Network error occurred", Exception: ex);
+        }
+        catch (JsonException ex)
+        {
+            return new ApiError("Failed to parse API response", Exception: ex);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<OneOf<List<SptVersionResult>, ApiError>> GetAllSptVersionsAsync(
         CancellationToken cancellationToken = default
     )

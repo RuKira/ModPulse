@@ -145,4 +145,14 @@ internal sealed class FakeForgeApiService : IForgeApiService
         OneOf<List<AddonResult>, ApiError> result = OnGetAddons is not null ? OnGetAddons(modId) : new List<AddonResult>();
         return Task.FromResult(result);
     }
+
+    public Task<OneOf<List<SptVersionResult>, ApiError>> GetSptVersionsInMinorAsync(
+        int major,
+        int minor,
+        CancellationToken cancellationToken = default
+    )
+    {
+        OneOf<List<SptVersionResult>, ApiError> result = new List<SptVersionResult>();
+        return Task.FromResult(result);
+    }
 }

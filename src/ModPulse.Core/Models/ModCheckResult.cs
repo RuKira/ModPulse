@@ -46,6 +46,12 @@ public sealed class ModCheckResult
     /// <summary>The installed SPT version.</summary>
     public SemanticVersioning.Version? SptVersion { get; internal set; }
 
+    /// <summary>
+    /// The SPT version used for Forge queries: the installed one, or the newest same-minor patch the Forge lists when it
+    /// doesn't list the installed one (SPT 3.11.5 -> 3.11.4).
+    /// </summary>
+    public SemanticVersioning.Version? ForgeSptVersion { get; internal set; }
+
     /// <summary>True for SPT below 3.11 (legacy rules applied).</summary>
     public bool IsLegacy
     {

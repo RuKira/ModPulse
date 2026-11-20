@@ -96,10 +96,11 @@ public sealed class MainViewModelTests : IDisposable
     }
 
     [Theory]
-    [InlineData(ModCheckOutcome.SptNotValidated, "No SPT install found")]
-    [InlineData(ModCheckOutcome.Cancelled, "cancelled")]
-    [InlineData(ModCheckOutcome.NoMods, "No mods")]
-    public void Early_exit_shows_the_stopped_panel(ModCheckOutcome outcome, string message)
+    [InlineData(ModCheckOutcome.SptNotValidated, "No SPT install found", "Check stopped", true)]
+    [InlineData(ModCheckOutcome.Failed, "went wrong", "Check stopped", true)]
+    [InlineData(ModCheckOutcome.Cancelled, "cancelled", "Check cancelled", false)]
+    [InlineData(ModCheckOutcome.NoMods, "has no server mods", "No mods to check", false)]
+    public void Early_exit_shows_the_stopped_panel(ModCheckOutcome outcome, string message, string title, bool isError)
     {
         var vm = Create();
 
@@ -107,6 +108,8 @@ public sealed class MainViewModelTests : IDisposable
 
         Assert.Equal(ViewState.Stopped, vm.State);
         Assert.Contains(message, vm.StoppedMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(title, vm.StoppedTitle);
+        Assert.Equal(isError, vm.StoppedIsError);
     }
 
     [Fact]

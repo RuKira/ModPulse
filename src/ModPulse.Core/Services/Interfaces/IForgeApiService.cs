@@ -148,4 +148,14 @@ public interface IForgeApiService
     /// <param name="modId">The parent mod's Forge ID.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     Task<OneOf<List<AddonResult>, ApiError>> GetAddonsForModAsync(int modId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists the Forge's SPT versions within one MAJOR.MINOR line (e.g. 3.11.0 to 3.11.4), used to find a stand-in when
+    /// the installed patch isn't listed.
+    /// </summary>
+    Task<OneOf<List<SptVersionResult>, ApiError>> GetSptVersionsInMinorAsync(
+        int major,
+        int minor,
+        CancellationToken cancellationToken = default
+    );
 }

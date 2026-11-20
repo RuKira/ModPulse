@@ -124,6 +124,14 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string _stoppedMessage = string.Empty;
 
+    /// <summary>Heading of the stopped card ("Check stopped", or "No mods to check" for an empty install).</summary>
+    [ObservableProperty]
+    private string _stoppedTitle = "Check stopped";
+
+    /// <summary>False for outcomes that aren't problems (an empty install, a cancelled check): neutral card.</summary>
+    [ObservableProperty]
+    private bool _stoppedIsError = true;
+
     // ===== Install summary =====
 
     [ObservableProperty]
@@ -135,6 +143,10 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isLegacy;
+
+    /// <summary>"Checked as 3.11.4" when the Forge doesn't list the installed patch; null otherwise.</summary>
+    [ObservableProperty]
+    private string? _forgeStandInText;
 
     [ObservableProperty]
     private string? _sptUpdateText;
@@ -254,6 +266,8 @@ public sealed partial class MainViewModel : ObservableObject
         if (!Directory.Exists(path))
         {
             State = ViewState.Stopped;
+            StoppedTitle = "Check stopped";
+            StoppedIsError = true;
             StoppedMessage = $"Folder not found: {path}";
             return;
         }
@@ -337,6 +351,10 @@ public sealed partial class MainViewModel : ObservableObject
                 : $"Server: {Path.GetFileName(install.ServerRoot)}")
             : string.Empty;
         IsLegacy = result.IsLegacy;
+        ForgeStandInText =
+            result.ForgeSptVersion is { } forge && result.SptVersion is { } installed && forge != installed
+                ? $"Checked as SPT {forge}"
+                : null;
         SptUpdateText = result.SptUpdate is { } spt ? $"SPT {spt.Version} available" : null;
         SptUpdateUrl = result.SptUpdate?.Link;
         ModPulseUpdateText = result.ModPulseUpdate is { Status: ModPulseUpdateStatus.UpdateAvailable } mp
@@ -402,6 +420,13 @@ public sealed partial class MainViewModel : ObservableObject
             default:
                 State = ViewState.Stopped;
                 StoppedMessage = StoppedText(result);
+                StoppedIsError = result.Outcome is not (ModCheckOutcome.NoMods or ModCheckOutcome.Cancelled);
+                StoppedTitle = result.Outcome switch
+                {
+                    ModCheckOutcome.NoMods => "No mods to check",
+                    ModCheckOutcome.Cancelled => "Check cancelled",
+                    _ => "Check stopped",
+                };
                 break;
         }
     }
@@ -413,7 +438,8 @@ public sealed partial class MainViewModel : ObservableObject
             ModCheckOutcome.InvalidPath => "That folder can't be checked. Pick your SPT game folder.",
             ModCheckOutcome.SptNotValidated =>
                 "No SPT install found here, or its version couldn't be read. Pick the folder that contains EscapeFromTarkov.exe (or the SPT server folder).",
-            ModCheckOutcome.NoMods => "No mods were found in this install.",
+            ModCheckOutcome.NoMods =>
+                "This install has no server mods (user/mods) or client mods (BepInEx/plugins) yet. Install some and check again.",
             ModCheckOutcome.Cancelled => "Check cancelled.",
             ModCheckOutcome.Failed => $"Something went wrong: {result.Error?.Message}. The log has details.",
             _ => string.Empty,

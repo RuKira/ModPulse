@@ -57,15 +57,20 @@ public sealed class ApplicationService(
             logger.LogInformation("Using SPT path: {SptPath}", sptPath);
 
             logger.LogDebug("Validating SPT installation");
-            var sptVersion = await ValidateSptInstallationAsync(sptPath, cancellationToken);
-            if (sptVersion is null)
+            var versionCheck = await ValidateSptInstallationAsync(sptPath, cancellationToken);
+            if (versionCheck is null)
             {
                 logger.LogWarning("SPT version validation failed, exiting");
                 result.Outcome = ModCheckOutcome.SptNotValidated;
                 return result;
             }
 
-            result.SptVersion = sptVersion;
+            result.SptVersion = versionCheck.Installed;
+            result.ForgeSptVersion = versionCheck.Forge;
+
+            // Every Forge query and compatibility check uses the Forge-known version (a same-minor stand-in when the
+            // Forge doesn't list the installed patch).
+            var sptVersion = versionCheck.Forge;
 
             logger.LogInformation("SPT version validated: {SptVersion}", sptVersion);
 
@@ -138,7 +143,7 @@ public sealed class ApplicationService(
             CheckModVersionCompatibility(mods, sptVersion);
 
             logger.LogDebug("Checking mod dependencies");
-            await CheckModDependenciesAsync(mods, sptVersion, cancellationToken);
+            await CheckModDependenciesAsync(mods, sptPath, sptVersion, cancellationToken);
 
             logger.LogDebug("Displaying results");
             reporter.VersionTable(mods);
@@ -283,26 +288,27 @@ public sealed class ApplicationService(
     /// </summary>
     /// <param name="sptPath">Path to SPT installation.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
-    /// <returns>SPT version or null if validation failed.</returns>
-    private async Task<SemanticVersioning.Version?> ValidateSptInstallationAsync(
+    /// <returns>The installed and Forge-query SPT versions, or null if validation failed.</returns>
+    private async Task<SptVersionCheck?> ValidateSptInstallationAsync(
         string sptPath,
         CancellationToken cancellationToken = default
     )
     {
-        var sptVersion = await sptInstallationService.GetAndValidateSptVersionAsync(sptPath, cancellationToken);
-        if (sptVersion is null)
+        var check = await sptInstallationService.GetAndValidateSptVersionAsync(sptPath, cancellationToken);
+        if (check is null)
         {
             return null;
         }
 
-        reporter.SptVersionValidated(sptVersion.ToString());
+        reporter.SptVersionValidated(check.Installed.ToString());
 
-        await CheckForSptUpdatesAsync(sptVersion, cancellationToken);
+        // SPT updates are relative to what's installed, not the stand-in.
+        await CheckForSptUpdatesAsync(check.Installed, cancellationToken);
 
         reporter.Blank();
         reporter.Rule();
         reporter.Blank();
-        return sptVersion;
+        return check;
     }
 
     /// <summary>
@@ -826,20 +832,33 @@ public sealed class ApplicationService(
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     private async Task CheckModDependenciesAsync(
         List<Mod> mods,
+        string sptPath,
         SemanticVersioning.Version sptVersion,
         CancellationToken cancellationToken = default
     )
     {
+        var builtInGuids = modScannerService.GetBuiltInPluginGuids(sptPath);
+
         if (!mods.Any(m => m.IsMatched))
         {
+            // Nothing to ask the Forge about, but plugins may still declare dependencies in their DLLs.
+            var localOnly = new DependencyAnalysisResult();
+            await AddDeclaredDependenciesAsync(localOnly, mods, builtInGuids, sptVersion, cancellationToken);
+            if (localOnly.HasIssues)
+            {
+                _result.Dependencies = localOnly;
+                reporter.DependencyResults(localOnly);
+            }
+
             return;
         }
 
         reporter.Blank();
 
-        // Build set of installed mod GUIDs
-        var installedGuids = mods.Where(m => !string.IsNullOrWhiteSpace(m.Guid))
-            .Select(m => m.Guid)
+        // Build set of installed mod GUIDs (including alternate plugin GUIDs and SPT's own plugins)
+        var installedGuids = mods.SelectMany(m => new[] { m.Guid }.Concat(m.AlternateGuids))
+            .Concat(builtInGuids)
+            .Where(g => !string.IsNullOrWhiteSpace(g))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Count matched mods for progress
@@ -871,7 +890,70 @@ public sealed class ApplicationService(
                 )
         );
 
+        await AddDeclaredDependenciesAsync(result, mods, builtInGuids, sptVersion, cancellationToken);
+
         _result.Dependencies = result;
         reporter.DependencyResults(result);
+    }
+
+    /// <summary>
+    /// Adds hard dependencies that installed plugins declare in their DLLs (<c>[BepInDependency]</c>) but that aren't
+    /// installed. Each is looked up on the Forge by GUID for a name and download; unknown GUIDs are reported as-is.
+    /// </summary>
+    private async Task AddDeclaredDependenciesAsync(
+        DependencyAnalysisResult result,
+        List<Mod> mods,
+        IReadOnlyList<string> builtInGuids,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken
+    )
+    {
+        var alreadyReported = result.MissingDependencies.Select(m => m.Guid).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (guid, requiredBy) in LocalDependencyChecker.FindMissing(mods, builtInGuids))
+        {
+            if (alreadyReported.Contains(guid))
+            {
+                continue;
+            }
+
+            var names = string.Join(", ", requiredBy.Select(m => m.DisplayName).Distinct());
+            var lookup = await forgeApiService.GetModByGuidAsync(guid, sptVersion, cancellationToken);
+            var forgeMod = lookup.Match<ModSearchResult?>(found => found, _ => null, noCompat => noCompat.Mod, _ => null);
+
+            if (forgeMod is null)
+            {
+                result.MissingDependencies.Add(
+                    new MissingDependency
+                    {
+                        Name = guid,
+                        Guid = guid,
+                        ModId = 0,
+                        Slug = string.Empty,
+                        RecommendedVersion = string.Empty,
+                        RequiredBy = names,
+                    }
+                );
+                continue;
+            }
+
+            var best = forgeMod.Versions
+                ?.Where(v => SemVer.SupportsSpt(v.SptVersionConstraint, sptVersion))
+                .OrderByDescending(v => SemVer.ParseOrZero(v.Version))
+                .FirstOrDefault();
+
+            result.MissingDependencies.Add(
+                new MissingDependency
+                {
+                    Name = forgeMod.Name,
+                    Guid = guid,
+                    ModId = forgeMod.Id,
+                    Slug = forgeMod.Slug,
+                    RecommendedVersion = best?.Version ?? string.Empty,
+                    DownloadLink = best is null ? null : ForgeUrls.Download(forgeMod.Id, forgeMod.Slug, best.Version),
+                    RequiredBy = names,
+                }
+            );
+        }
     }
 }

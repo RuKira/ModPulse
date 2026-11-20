@@ -10,7 +10,7 @@
         FontFamily="{StaticResource Font.Ui}" FontSize="13"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
-        Icon="pack://application:,,,/ModPulseGUI;component/Assets/check-mods.ico">
+        Icon="pack://application:,,,/ModPulseGUI;component/Assets/modpulse.ico">
 
     <Window.InputBindings>
         <KeyBinding Key="F5" Command="{Binding CheckCommand}" />
@@ -225,6 +225,11 @@
                 <Border Style="{StaticResource Chip}">
                     <TextBlock Text="{Binding ServerFolderText}" Foreground="{DynamicResource Brush.TextMuted}" />
                 </Border>
+                <Border Style="{StaticResource Chip}" BorderBrush="{DynamicResource Brush.Info}"
+                        Visibility="{Binding ForgeStandInText, Converter={StaticResource HasValueToVisibility}}"
+                        ToolTip="The Forge doesn't list your exact SPT patch, so mods are checked against the newest patch it knows in the same minor version. Mods for that patch work on yours.">
+                    <TextBlock Text="{Binding ForgeStandInText}" Foreground="{DynamicResource Brush.Info}" />
+                </Border>
                 <Border Style="{StaticResource Chip}" BorderBrush="{DynamicResource Brush.Legacy}"
                         Visibility="{Binding IsLegacy, Converter={StaticResource HasValueToVisibility}}"
                         ToolTip="SPT below 3.11 is Legacy: mods are assumed to match your SPT, and only updates Forge confirms for your exact SPT version are offered.">
@@ -304,9 +309,18 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <Border Style="{StaticResource Card}" BorderBrush="{DynamicResource Brush.Bad}" Padding="22,18">
+                <Border Padding="22,18">
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource Card}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding StoppedIsError}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Bad}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <StackPanel>
-                        <TextBlock Text="Check stopped" Style="{StaticResource Text.Section}" />
+                        <TextBlock Text="{Binding StoppedTitle}" Style="{StaticResource Text.Section}" />
                         <TextBlock Text="{Binding StoppedMessage}" Style="{StaticResource Text.Muted}" Margin="0,8,0,0" FontSize="14" />
                     </StackPanel>
                 </Border>
@@ -510,11 +524,12 @@
                                                                     Visibility="{Binding DownloadUrl, Converter={StaticResource HasValueToVisibility}}" />
                                                             <Button Style="{StaticResource Button.Small}" Content="Forge page"
                                                                     Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                    CommandParameter="{Binding ForgeUrl}" />
+                                                                    CommandParameter="{Binding ForgeUrl}"
+                                                                    Visibility="{Binding ForgeUrl, Converter={StaticResource HasValueToVisibility}}" />
                                                         </StackPanel>
                                                         <StackPanel>
                                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                                            <TextBlock Foreground="{DynamicResource Brush.TextMuted}" Text="{Binding Version, StringFormat='Needs version {0}'}" />
+                                                            <TextBlock Foreground="{DynamicResource Brush.TextMuted}" Text="{Binding Detail}" TextWrapping="Wrap" />
                                                         </StackPanel>
                                                     </DockPanel>
                                                 </Border>

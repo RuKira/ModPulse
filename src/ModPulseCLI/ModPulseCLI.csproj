@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>ModPulseCLI</AssemblyName>
     <AssemblyTitle>ModPulseCLI</AssemblyTitle>
-    <ApplicationIcon>..\..\assets\check-mods.ico</ApplicationIcon>
+    <ApplicationIcon>..\..\assets\modpulse.ico</ApplicationIcon>
     <!--
     Publish a standalone single-file exe: the .NET runtime is bundled, so users don't need .NET 10 installed.
     Self-contained requires a runtime identifier, so it only applies to publishes with -r (plain builds stay

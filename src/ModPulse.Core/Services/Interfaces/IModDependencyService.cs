@@ -140,4 +140,10 @@ public class MissingDependency
     /// Download link for the dependency.
     /// </summary>
     public string? DownloadLink { get; init; }
+
+    /// <summary>
+    /// Mods that declare this dependency in their own DLL (<c>[BepInDependency]</c>), e.g. "Game Panel HUD". Null for
+    /// dependencies found only through the Forge.
+    /// </summary>
+    public string? RequiredBy { get; init; }
 }

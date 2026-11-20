@@ -726,7 +726,23 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
                 : $"[white]{dep.Name.EscapeMarkup()}[/]";
 
             var depNode = tree.AddNode(nameDisplay);
-            depNode.AddNode($"[grey]Recommended version:[/] [green]{dep.RecommendedVersion.EscapeMarkup()}[/]");
+            if (!string.IsNullOrWhiteSpace(dep.RequiredBy))
+            {
+                depNode.AddNode($"[grey]Required by:[/] {dep.RequiredBy.EscapeMarkup()} [grey](declared in its DLL)[/]");
+            }
+
+            if (!string.IsNullOrWhiteSpace(dep.RecommendedVersion))
+            {
+                depNode.AddNode($"[grey]Recommended version:[/] [green]{dep.RecommendedVersion.EscapeMarkup()}[/]");
+            }
+            else if (dep.ModId <= 0)
+            {
+                depNode.AddNode($"[grey]Not found on the Forge (GUID {dep.Guid.EscapeMarkup()}).[/]");
+            }
+            else
+            {
+                depNode.AddNode("[yellow]No version on the Forge supports your SPT version.[/]");
+            }
 
             if (!string.IsNullOrWhiteSpace(dep.DownloadLink))
             {

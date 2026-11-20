@@ -218,9 +218,52 @@ public sealed class ModScannerService(
             mods.AddRange(ConsolidateDirectoryMods(directory, directoryDlls));
         }
 
+        // A library whose GUID belongs to an installed plugin is part of that mod, not a mod of its own.
+        var pluginGuids = mods.Where(m => !m.IsLibrary)
+            .SelectMany(m => new[] { m.Guid }.Concat(m.AlternateGuids))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        mods = mods.Where(m => !m.IsLibrary || !pluginGuids.Contains(m.Guid))
+            .DistinctBy(m => m.IsLibrary ? m.Guid.ToLowerInvariant() : m.FilePath)
+            .ToList();
+
+        foreach (var failure in DependencyReadFailures.Distinct())
+        {
+            logger.LogDebug("Could not read a [BepInDependency]: {Failure}", failure);
+        }
+
         logger.LogInformation("Found {ModCount} client mods", mods.Count);
         reporter.Status($"Found {mods.Count} client mods.");
         return mods;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> GetBuiltInPluginGuids(string sptPath)
+    {
+        var sptPluginsDir = Path.Combine(sptPath, "BepInEx", "plugins", "spt");
+        if (!Directory.Exists(sptPluginsDir))
+        {
+            return [];
+        }
+
+        List<string> guids = [];
+        foreach (var dllPath in Directory.EnumerateFiles(sptPluginsDir, "*.dll", SearchOption.AllDirectories))
+        {
+            try
+            {
+                using var loadContext = CreateMetadataLoadContext(dllPath);
+                var assembly = loadContext.LoadFromByteArray(File.ReadAllBytes(dllPath));
+                if (ScanAssemblyForBepInPluginAttribute(assembly) is { } plugin)
+                {
+                    guids.Add(plugin.Guid);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Skipping unreadable SPT plugin DLL: {DllPath}", dllPath);
+            }
+        }
+
+        return guids;
     }
 
     /// <summary>
@@ -265,15 +308,20 @@ public sealed class ModScannerService(
     private List<Mod> ConsolidateDirectoryMods(string directory, List<string> dllPaths)
     {
         var allPlugins = ReadPluginDlls(dllPaths);
-
-        if (allPlugins.Count == 0)
-        {
-            return [];
-        }
-
         var directoryName = Path.GetFileName(directory);
 
-        return PartitionByRelatedness(allPlugins).Select(group => CreateConsolidatedMod(group, directoryName)).ToList();
+        var mods = allPlugins.Count == 0
+            ? []
+            : PartitionByRelatedness(allPlugins).Select(group => CreateConsolidatedMod(group, directoryName)).ToList();
+
+        // A folder with no plugin at all may hold a library other mods depend on. DLLs next to a plugin are that mod's
+        // own helpers (UniTask, VContainer, shared code...), never separate mods.
+        if (allPlugins.Count == 0)
+        {
+            mods.AddRange(dllPaths.Select(TryCreateLibraryMod).OfType<Mod>());
+        }
+
+        return mods;
     }
 
     /// <summary>
@@ -336,6 +384,16 @@ public sealed class ModScannerService(
         {
             mod.AlternateGuids.Add(guid);
         }
+
+        // Dependencies of every plugin in the group, minus the ones the group provides itself.
+        var groupGuids = plugins.Select(item => item.Plugin.Guid).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var declared = plugins
+            .SelectMany(item => item.Plugin.Dependencies)
+            .Where(d => !groupGuids.Contains(d.Guid))
+            .GroupBy(d => d.Guid, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new DeclaredDependency(g.First().Guid, g.Any(d => d.IsHard)));
+        mod.DeclaredDependencies.Clear();
+        mod.DeclaredDependencies.AddRange(declared);
 
         return mod;
     }
@@ -1116,7 +1174,7 @@ public sealed class ModScannerService(
             using var loadContext = CreateMetadataLoadContext(dllPath);
             var assembly = loadContext.LoadFromByteArray(File.ReadAllBytes(dllPath));
 
-            return ScanAssemblyForBepInPlugin(assembly, dllPath);
+            return ScanAssemblyForBepInPlugin(assembly, dllPath) ?? TryCreateLibraryMod(dllPath);
         }
         catch (Exception ex)
         {
@@ -1178,7 +1236,52 @@ public sealed class ModScannerService(
             return null;
         }
 
-        return new BepInPluginAttribute(guid, name, version);
+        return new BepInPluginAttribute(guid, name, version) { Dependencies = ExtractDeclaredDependencies(customAttributes) };
+    }
+
+    /// <summary>
+    /// Reads <c>[BepInDependency]</c> attributes: <c>(guid)</c> and <c>(guid, minimumVersion)</c> are hard;
+    /// <c>(guid, DependencyFlags)</c> is hard unless the flags are SoftDependency (2).
+    /// </summary>
+    /// <summary>Diagnostics: dependency attributes that couldn't be read (logged after a scan).</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentBag<string> DependencyReadFailures = [];
+
+    private static List<DeclaredDependency> ExtractDeclaredDependencies(IList<CustomAttributeData> attributes)
+    {
+        List<DeclaredDependency> dependencies = [];
+        foreach (var attribute in attributes)
+        {
+            var typeName = attribute.AttributeType.Name;
+            if (typeName is not ("BepInDependency" or "BepInDependencyAttribute") || attribute.ConstructorArguments.Count == 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                var dependencyGuid = attribute.ConstructorArguments[0].Value?.ToString();
+                if (string.IsNullOrWhiteSpace(dependencyGuid))
+                {
+                    continue;
+                }
+
+                var isHard = true;
+                if (attribute.ConstructorArguments.Count > 1 && attribute.ConstructorArguments[1].Value is int flags)
+                {
+                    isHard = (flags & 2) == 0;
+                }
+
+                dependencies.Add(new DeclaredDependency(dependencyGuid, isHard));
+            }
+            catch (Exception ex)
+            {
+                // An unreadable dependency must never cost us the plugin itself.
+                System.Diagnostics.Debug.WriteLine(ex);
+                DependencyReadFailures.Add(ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
+        return dependencies;
     }
 
     private Mod CreateModFromBepInPlugin(BepInPluginAttribute plugin, string dllPath)
@@ -1197,6 +1300,45 @@ public sealed class ModScannerService(
             LocalVersion = plugin.Version,
             LocalSptVersion = null,
             LoadWarnings = warnings,
+            DeclaredDependencies = plugin.Dependencies.ToList(),
+        };
+    }
+
+    /// <summary>
+    /// A library DLL (no <c>[BepInPlugin]</c>) as a client mod, when it carries a GUID naming itself (see
+    /// <see cref="LibraryDllIdentity"/>); null otherwise.
+    /// </summary>
+    private Mod? TryCreateLibraryMod(string dllPath)
+    {
+        string? assemblyName;
+        try
+        {
+            assemblyName = AssemblyName.GetAssemblyName(dllPath).Name;
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or IOException or ArgumentException)
+        {
+            return null;
+        }
+
+        var identity = LibraryDllIdentity.TryIdentify(dllPath, assemblyName);
+        if (identity is null)
+        {
+            return null;
+        }
+
+        var (guid, version) = identity.Value;
+        logger.LogDebug("Library DLL {DllPath} identified as {Guid} {Version}", dllPath, guid, version);
+
+        var segments = guid.Split('.');
+        return new Mod
+        {
+            Guid = guid,
+            FilePath = dllPath,
+            IsServerMod = false,
+            LocalName = assemblyName ?? Path.GetFileNameWithoutExtension(dllPath),
+            LocalAuthor = segments.Length >= 3 ? segments[1] : "Unknown",
+            LocalVersion = version,
+            IsLibrary = true,
         };
     }
 

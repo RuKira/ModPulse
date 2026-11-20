@@ -110,15 +110,36 @@ public sealed record ProblemItem(ProblemKind Kind, string Title, string Detail, 
 }
 
 /// <summary>A dependency that's required but not installed.</summary>
-public sealed record MissingDependencyItem(string Name, string Version, string ForgeUrl, string? DownloadUrl)
+public sealed record MissingDependencyItem(
+    string Name,
+    string Version,
+    string? ForgeUrl,
+    string? DownloadUrl,
+    string? RequiredBy = null
+)
 {
+    /// <summary>One line under the name: what's needed, and who needs it.</summary>
+    public string Detail
+    {
+        get
+        {
+            var need = !string.IsNullOrWhiteSpace(Version)
+                ? $"Needs version {Version}"
+                : ForgeUrl is null
+                    ? "Not found on the Forge"
+                    : "No version on the Forge supports your SPT";
+            return RequiredBy is null ? need : $"{need} · required by {RequiredBy}";
+        }
+    }
+
     public static MissingDependencyItem From(MissingDependency missing)
     {
         return new MissingDependencyItem(
             missing.Name,
             missing.RecommendedVersion,
-            ForgeUrls.ModPage(missing.ModId, missing.Slug),
-            missing.DownloadLink
+            missing.ModId > 0 ? ForgeUrls.ModPage(missing.ModId, missing.Slug) : null,
+            missing.DownloadLink,
+            missing.RequiredBy
         );
     }
 }

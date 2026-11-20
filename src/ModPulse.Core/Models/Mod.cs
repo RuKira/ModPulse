@@ -32,6 +32,15 @@ public sealed class Mod
     /// </summary>
     public List<string> AlternateGuids { get; init; } = [];
 
+    /// <summary>Dependencies declared in the mod's own DLLs (<c>[BepInDependency]</c>), not from the Forge.</summary>
+    public List<DeclaredDependency> DeclaredDependencies { get; init; } = [];
+
+    /// <summary>
+    /// True for a library DLL (no <c>[BepInPlugin]</c>) identified by a GUID string naming itself, e.g. Effects Manager
+    /// Framework's EFTEffectManager.dll.
+    /// </summary>
+    public bool IsLibrary { get; init; }
+
     #endregion
 
     #region Local Metadata (from scanning)

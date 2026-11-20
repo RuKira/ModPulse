@@ -132,3 +132,6 @@ DocumentLayout.json
 
 # ModPulseGUI personal color palette (kept out of the repo)
 src/ModPulseGUI/Themes/Colors.local.xaml
+
+# Local planning notes (never committed)
+planning/
