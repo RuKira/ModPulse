@@ -46,12 +46,7 @@ public sealed class IgnoredUpdateStore(IOptions<IgnoredUpdateOptions> options, I
     /// <inheritdoc />
     public bool IsIgnored(Mod mod)
     {
-        if (!mod.ApiModId.HasValue || mod.LatestVersion is null)
-        {
-            return false;
-        }
-
-        return IsIgnored(mod.ApiModId.Value, mod.LocalVersion, mod.LatestVersion);
+        return GetIgnoreSource(mod) is not null;
     }
 
     /// <summary>Value-based overload of <see cref="IsIgnored(Mod)"/>.</summary>
@@ -63,17 +58,17 @@ public sealed class IgnoredUpdateStore(IOptions<IgnoredUpdateOptions> options, I
     /// <inheritdoc />
     public IgnoreSource? GetIgnoreSource(Mod mod)
     {
-        if (!mod.ApiModId.HasValue || mod.LatestVersion is null)
-        {
-            return null;
-        }
-
-        return GetIgnoreSource(mod.ApiModId.Value, mod.LocalVersion, mod.LatestVersion);
+        var entry = IgnoredUpdate.For(mod);
+        return entry is null ? null : GetIgnoreSource(entry.Key);
     }
 
     private IgnoreSource? GetIgnoreSource(int apiModId, string localVersion, string latestVersion)
     {
-        var key = MakeKey(apiModId, localVersion, latestVersion);
+        return GetIgnoreSource(IgnoredUpdate.MakeKey(apiModId, null, localVersion, latestVersion));
+    }
+
+    private IgnoreSource? GetIgnoreSource(string key)
+    {
 
         var local = Load().FirstOrDefault(e => string.Equals(e.Key, key, StringComparison.OrdinalIgnoreCase));
         if (local is not null)
@@ -183,10 +178,5 @@ public sealed class IgnoredUpdateStore(IOptions<IgnoredUpdateOptions> options, I
     private void RebuildKeys()
     {
         _keys = (_cache ?? []).Select(e => e.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static string MakeKey(int apiModId, string localVersion, string latestVersion)
-    {
-        return $"{apiModId}|{localVersion}|{latestVersion}";
     }
 }

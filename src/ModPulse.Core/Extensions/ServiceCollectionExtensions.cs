@@ -37,6 +37,7 @@ public static class ServiceCollectionExtensions
         services.Configure<LoggingOptions>(_ => { });
         services.Configure<IgnoredUpdateOptions>(_ => { });
         services.Configure<ForgeCacheOptions>(_ => { });
+        services.Configure<GitHubOptions>(_ => { });
 
         services.AddMemoryCache();
 
@@ -97,6 +98,20 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppIdentity.Name, version));
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         });
+
+        // GitHub release checks for off-Forge mods linked to a repository.
+        services.AddHttpClient<IGitHubReleaseClient, GitHubReleaseClient>(
+            (serviceProvider, client) =>
+            {
+                var gitHubOptions = serviceProvider.GetRequiredService<IOptions<GitHubOptions>>().Value;
+                client.Timeout = TimeSpan.FromSeconds(gitHubOptions.TimeoutSeconds);
+
+                var version = CoreAssembly.GetName().Version?.ToString() ?? "0.0.0";
+                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppIdentity.Name, version));
+                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+                client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+            }
+        );
 
         return services;
     }

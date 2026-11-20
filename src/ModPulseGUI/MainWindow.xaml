@@ -381,7 +381,7 @@
                                     <StackPanel>
                                         <TextBlock Text="{Binding NotOnForge.Count}" Style="{StaticResource StatNumber}"
                                                    Foreground="{DynamicResource Brush.Info}" />
-                                        <TextBlock Text="Not on Forge" Style="{StaticResource StatLabel}" />
+                                        <TextBlock Text="Off Forge" Style="{StaticResource StatLabel}" />
                                     </StackPanel>
                                 </Button>
                                 <Button Style="{StaticResource StatTile}" Command="{Binding SelectTabCommand}" CommandParameter="5">
@@ -411,7 +411,7 @@
                                 <Button DockPanel.Dock="Right" Content="Open all update pages"
                                         Command="{Binding OpenAllUpdatePagesCommand}" />
                                 <TextBlock Style="{StaticResource Text.Muted}" VerticalAlignment="Center" Margin="2,0,16,0">
-                                    <Run Text="Use" /> <Run Text="Ignore" FontWeight="SemiBold" /> <Run Text="when Forge's newer version is the files you already have (the mod's DLL just reports an old version)." />
+                                    <Run Text="Use" /> <Run Text="Ignore" FontWeight="SemiBold" /> <Run Text="when the newer version is the files you already have (the mod's DLL just reports an old version). GitHub releases don't list SPT versions, so check those before updating." />
                                     <Run Text="{Binding IgnoredCount, Mode=OneWay, StringFormat='{}{0} ignored (see All mods).'}" Foreground="{DynamicResource Brush.TextDim}" />
                                 </TextBlock>
                             </DockPanel>
@@ -435,12 +435,13 @@
                                                                 Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                 CommandParameter="{Binding DownloadUrl}"
                                                                 Visibility="{Binding DownloadUrl, Converter={StaticResource HasValueToVisibility}}" />
-                                                        <Button Style="{StaticResource Button.Small}" Content="Forge page" Margin="0,0,6,0"
+                                                        <Button Style="{StaticResource Button.Small}" Content="{Binding PageLabel}" Margin="0,0,6,0"
                                                                 Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                CommandParameter="{Binding ForgeUrl}" />
+                                                                CommandParameter="{Binding PageUrl}"
+                                                                Visibility="{Binding PageUrl, Converter={StaticResource HasValueToVisibility}}" />
                                                         <Button Style="{StaticResource Button.Small}" Content="Ignore"
                                                                 Visibility="{Binding CanIgnore, Converter={StaticResource HasValueToVisibility}}"
-                                                                ToolTip="Mark this update as a false positive: the newer Forge version is the files you already have."
+                                                                ToolTip="Mark this update as a false positive: the newer version is the files you already have."
                                                                 Command="{Binding DataContext.IgnoreUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                                 CommandParameter="{Binding}" />
                                                     </StackPanel>
@@ -583,11 +584,14 @@
                     <!-- Not on Forge -->
                     <TabItem>
                         <TabItem.Header>
-                            <TextBlock><Run Text="Not on Forge" /> <Run Text="{Binding NotOnForge.Count, Mode=OneWay}" Foreground="{DynamicResource Brush.TextDim}" /></TextBlock>
+                            <TextBlock><Run Text="Off Forge" /> <Run Text="{Binding NotOnForge.Count, Mode=OneWay}" Foreground="{DynamicResource Brush.TextDim}" /></TextBlock>
                         </TabItem.Header>
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Text.Muted}" Margin="2,0,0,10"
-                                       Text="ModPulse couldn't find these on the Forge, so it can't check them for updates or compatibility. Usually the mod isn't published there, or both its GUID and name differ from the Forge listing. Addons and plugins bundled with another mod are recognized and listed under All mods." />
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Text.Muted}" Margin="2,0,0,10" TextWrapping="Wrap">
+                                <Run Text="ModPulse couldn't find these on the Forge. Usually the mod isn't published there, or both its GUID and name differ from the Forge listing. Addons and plugins bundled with another mod are listed under All mods." />
+                                <LineBreak />
+                                <Run Text="Published on GitHub? Use" /> <Run Text="Link GitHub repo" FontWeight="SemiBold" /> <Run Text="and ModPulse checks its releases for updates (GitHub doesn't list SPT versions, so it can't check compatibility)." />
+                            </TextBlock>
                             <Grid>
                                 <TextBlock Text="Every mod was found on the Forge." Style="{StaticResource EmptyText}"
                                            Visibility="{Binding NotOnForge.Count, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
@@ -596,9 +600,28 @@
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="MOD" Binding="{Binding Name}" Width="2*" />
                                         <DataGridTextColumn Header="AUTHOR" Binding="{Binding Author}" Width="*" />
-                                        <DataGridTextColumn Header="VERSION" Binding="{Binding InstalledVersion}" Width="90" />
+                                        <DataGridTextColumn Header="INSTALLED" Binding="{Binding InstalledVersion}" Width="90" />
+                                        <DataGridTextColumn Header="LATEST" Binding="{Binding LatestVersion}" Width="90" />
                                         <DataGridTextColumn Header="SIDE" Binding="{Binding Side}" Width="110" />
-                                        <DataGridTextColumn Header="GUID" Binding="{Binding Guid}" Width="2*" />
+                                        <DataGridTemplateColumn Header="STATUS" Width="170" SortMemberPath="StatusKind"
+                                                                CellTemplate="{StaticResource StatusPill}" />
+                                        <DataGridTemplateColumn Header="" Width="170">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Button Style="{StaticResource Button.Small}" Content="Release" Margin="0,0,6,0"
+                                                                Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding GitHubReleaseUrl}"
+                                                                Visibility="{Binding GitHubReleaseUrl, Converter={StaticResource HasValueToVisibility}}" />
+                                                        <Button Style="{StaticResource Button.Small}" Content="Link GitHub repo"
+                                                                ToolTip="Link this mod to its GitHub repository to check its releases for updates."
+                                                                Command="{Binding DataContext.LinkGitHubCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding}"
+                                                                Visibility="{Binding IsGitHubLinked, Converter={StaticResource HasValueToVisibility}, ConverterParameter=invert}" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
                                     </DataGrid.Columns>
                                 </DataGrid>
                             </Grid>
@@ -696,6 +719,10 @@
                                         Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         CommandParameter="{Binding ForgeUrl}"
                                         Visibility="{Binding ForgeUrl, Converter={StaticResource HasValueToVisibility}}" />
+                                <Button Style="{StaticResource Button.Small}" Content="GitHub" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding GitHubRepoUrl}"
+                                        Visibility="{Binding GitHubRepoUrl, Converter={StaticResource HasValueToVisibility}}" />
                                 <Button Style="{StaticResource Button.Small}" Content="Source code" Margin="0,0,6,6"
                                         Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         CommandParameter="{Binding SourceCodeUrl}"
@@ -711,6 +738,19 @@
                                         Command="{Binding DataContext.UnignoreUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         CommandParameter="{Binding}"
                                         Visibility="{Binding CanUnignore, Converter={StaticResource HasValueToVisibility}}" />
+                                <Button Style="{StaticResource Button.Small}" Content="Report mismatch" Margin="0,0,6,6"
+                                        ToolTip="Suggest this version mismatch for the community ignore list (opens a pre-filled GitHub issue for you to review and submit)."
+                                        Command="{Binding DataContext.ReportMismatchCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"
+                                        Visibility="{Binding CanReportMismatch, Converter={StaticResource HasValueToVisibility}}" />
+                                <Button Style="{StaticResource Button.Small}" Content="{Binding LinkGitHubLabel}" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.LinkGitHubCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"
+                                        Visibility="{Binding CanLinkGitHub, Converter={StaticResource HasValueToVisibility}}" />
+                                <Button Style="{StaticResource Button.Small}" Content="Remove GitHub link" Margin="0,0,6,6"
+                                        Command="{Binding DataContext.UnlinkGitHubCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding}"
+                                        Visibility="{Binding CanUnlinkGitHub, Converter={StaticResource HasValueToVisibility}}" />
                             </WrapPanel>
                         </StackPanel>
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
@@ -724,6 +764,18 @@
                                            Visibility="{Binding RelationText, Converter={StaticResource HasValueToVisibility}}" />
                                 <TextBlock Text="{Binding RelationText}" Style="{StaticResource Text.Value}"
                                            Visibility="{Binding RelationText, Converter={StaticResource HasValueToVisibility}}" />
+
+                                <TextBlock Text="GITHUB" Style="{StaticResource Text.Label}"
+                                           Visibility="{Binding GitHubText, Converter={StaticResource HasValueToVisibility}}" />
+                                <TextBlock Text="{Binding GitHubText}" Style="{StaticResource Text.Value}"
+                                           Visibility="{Binding GitHubText, Converter={StaticResource HasValueToVisibility}}" />
+                                <TextBlock Style="{StaticResource Text.Muted}" FontSize="12"
+                                           Visibility="{Binding GitHubReleaseUrl, Converter={StaticResource HasValueToVisibility}}">
+                                    <Hyperlink Foreground="{DynamicResource Brush.Accent}" Command="{Binding DataContext.OpenUrlCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                               CommandParameter="{Binding GitHubReleaseUrl}">
+                                        <Run Text="{Binding GitHubReleaseText, Mode=OneWay}" />
+                                    </Hyperlink>
+                                </TextBlock>
 
                                 <TextBlock Text="AUTHOR" Style="{StaticResource Text.Label}" />
                                 <TextBlock Text="{Binding Author}" Style="{StaticResource Text.Value}" />
@@ -777,6 +829,9 @@
                         Command="{Binding CopySummaryCommand}"
                         ToolTip="Copy a Markdown summary (for Discord or a bug report)"
                         Visibility="{Binding State, Converter={StaticResource EqualsToVisibility}, ConverterParameter=Results}" />
+                <Button Style="{StaticResource Button.Link}" Content="{Binding GitHubTokenLabel}" Margin="0,0,18,0"
+                        Command="{Binding SetGitHubTokenCommand}"
+                        ToolTip="Optional GitHub token for checking off-Forge mods linked to GitHub (raises the hourly limit)" />
                 <Button Style="{StaticResource Button.Link}" Content="Open log" Margin="0,0,18,0" Command="{Binding OpenLogFolderCommand}" />
                 <Button Style="{StaticResource Button.Link}" Content="Clear Forge cache" Command="{Binding ClearCacheCommand}" />
             </StackPanel>

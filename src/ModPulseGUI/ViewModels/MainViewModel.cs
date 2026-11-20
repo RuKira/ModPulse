@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using ModPulse.Configuration;
 using ModPulse.Gui.Services;
 using ModPulse.Models;
+using ModPulse.Services;
 using ModPulse.Services.Interfaces;
 using ModPulse.Utils;
 
@@ -29,6 +30,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IGuiSettingsStore _settingsStore;
     private readonly IShell _shell;
     private readonly Func<IIgnoredUpdateStore> _ignoreStoreFactory;
+    private readonly IGitHubLinker _gitHub;
     private readonly GuiSettings _settings;
     private readonly Func<DateTime> _now;
 
@@ -37,13 +39,15 @@ public sealed partial class MainViewModel : ObservableObject
         IGuiSettingsStore settingsStore,
         IShell shell,
         Func<IIgnoredUpdateStore> ignoreStoreFactory,
-        Func<DateTime>? now = null
+        Func<DateTime>? now = null,
+        IGitHubLinker? gitHub = null
     )
     {
         _runner = runner;
         _settingsStore = settingsStore;
         _shell = shell;
         _ignoreStoreFactory = ignoreStoreFactory;
+        _gitHub = gitHub ?? new GitHubLinker();
         _now = now ?? (() => DateTime.Now);
         _settings = settingsStore.Load();
 
@@ -286,7 +290,7 @@ public sealed partial class MainViewModel : ObservableObject
         {
             result = await _runner.RunAsync(
                 path,
-                new ModCheckRunOptions(RefreshFromForge, FetchCommunityIgnores),
+                new ModCheckRunOptions(RefreshFromForge, FetchCommunityIgnores, GitHubToken),
                 updates,
                 cancellationToken
             );
@@ -344,6 +348,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>Fills every panel from a finished (or stopped) check.</summary>
     internal void ShowResult(ModCheckResult result)
     {
+        _lastResult = result;
         SptVersionText = result.SptVersion is { } v ? $"SPT {v}" : string.Empty;
         ServerFolderText = result.Installation is { } install
             ? (string.Equals(install.ServerRoot, install.GameRoot, StringComparison.OrdinalIgnoreCase)
@@ -451,7 +456,8 @@ public sealed partial class MainViewModel : ObservableObject
     {
         Fill(Updates, AllMods.Where(m => m.StatusKind is ModStatusKind.Update or ModStatusKind.Blocked));
         Fill(Incompatible, AllMods.Where(m => m.StatusKind == ModStatusKind.Incompatible));
-        Fill(NotOnForge, AllMods.Where(m => m.StatusKind == ModStatusKind.NotOnForge));
+        // Every mod that isn't on the Forge (linked to GitHub or not); addons and bundled parts update with their parent.
+        Fill(NotOnForge, AllMods.Where(m => m.IsOffForge));
         IgnoredCount = AllMods.Count(m => m.StatusKind == ModStatusKind.Ignored);
 
         AllModsView.Refresh();
@@ -558,7 +564,8 @@ public sealed partial class MainViewModel : ObservableObject
 
         foreach (var row in targets)
         {
-            if (row.ForgeUrl is { } url)
+            // The Forge page, or the GitHub release for a linked off-Forge mod.
+            if ((row.ForgeUrl ?? row.GitHubReleaseUrl) is { } url)
             {
                 _shell.OpenUrl(url);
             }
@@ -574,22 +581,13 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void IgnoreUpdate(ModRowViewModel? row)
     {
-        if (row?.Mod is not { ApiModId: { } modId, LatestVersion: { } latest } mod)
+        if (row?.Mod is not { } mod || IgnoredUpdate.For(mod, IgnoreSource.User, DateTimeOffset.UtcNow) is not { } entry)
         {
             return;
         }
 
         var store = _ignoreStoreFactory();
         var entries = store.Load().ToList();
-        var entry = new IgnoredUpdate(
-            modId,
-            mod.LocalVersion,
-            latest,
-            mod.DisplayName,
-            mod.Guid,
-            IgnoreSource.User,
-            DateTimeOffset.UtcNow
-        );
 
         if (!entries.Any(e => string.Equals(e.Key, entry.Key, StringComparison.OrdinalIgnoreCase)))
         {
@@ -606,13 +604,13 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void UnignoreUpdate(ModRowViewModel? row)
     {
-        if (row?.Mod is not { ApiModId: { } modId, LatestVersion: { } latest } mod)
+        if (row?.Mod is not { } mod || IgnoredUpdate.For(mod) is not { } current)
         {
             return;
         }
 
         var store = _ignoreStoreFactory();
-        var key = new IgnoredUpdate(modId, mod.LocalVersion, latest).Key;
+        var key = current.Key;
         var entries = store.Load().ToList();
         if (entries.RemoveAll(e => string.Equals(e.Key, key, StringComparison.OrdinalIgnoreCase)) > 0)
         {
@@ -625,6 +623,176 @@ public sealed partial class MainViewModel : ObservableObject
         row.Refresh();
         RebuildStatusLists();
     }
+
+    /// <summary>
+    /// Opens a pre-filled GitHub issue suggesting this ignored version mismatch for the community list. Nothing is sent
+    /// until the user submits the issue in their browser.
+    /// </summary>
+    [RelayCommand]
+    private void ReportMismatch(ModRowViewModel? row)
+    {
+        if (row?.Mod is not { } mod || IgnoredUpdate.For(mod) is not { } entry)
+        {
+            return;
+        }
+
+        _shell.OpenUrl(IgnoreReportUrl.Build([entry], out _));
+        Activity.Add(new LogEntry(_now(), RunLogLevel.Info, $"Opened a report for {mod.DisplayName} in your browser."));
+    }
+
+    // ===== Commands: GitHub links =====
+
+    /// <summary>The saved GitHub token (decrypted), or null.</summary>
+    private string? GitHubToken
+    {
+        get { return TokenProtector.Unprotect(_settings.GitHubTokenProtected); }
+    }
+
+    public bool HasGitHubToken
+    {
+        get { return !string.IsNullOrWhiteSpace(_settings.GitHubTokenProtected); }
+    }
+
+    public string GitHubTokenLabel
+    {
+        get { return HasGitHubToken ? "GitHub token ✓" : "GitHub token"; }
+    }
+
+    /// <summary>
+    /// Links an off-Forge mod to a GitHub repository (or changes its link), then checks it right away. The repository
+    /// must exist; one with no releases yet can still be linked.
+    /// </summary>
+    [RelayCommand]
+    private async Task LinkGitHubAsync(ModRowViewModel? row)
+    {
+        if (row is not { IsOffForge: true } || _lastResult is null)
+        {
+            return;
+        }
+
+        var mod = row.Mod;
+        var input = _shell.Ask(
+            row.IsGitHubLinked ? "Change GitHub repository" : "Link to GitHub",
+            $"Where is {mod.DisplayName} published? Paste its GitHub repository (owner/repo) or any github.com link to it. ModPulse checks its releases for updates; it never downloads anything.",
+            row.GitHub?.Repo,
+            okText: "Link"
+        );
+        if (input is null)
+        {
+            return;
+        }
+
+        if (!GitHubRepoName.TryParse(input, out var repo))
+        {
+            _shell.Inform("Link to GitHub", $"\"{input.Trim()}\" isn't a GitHub repository. Use owner/repo or a github.com link.");
+            return;
+        }
+
+        IsBusyLinking = true;
+        try
+        {
+            var lookup = await _gitHub.LookupAsync(repo, GitHubToken);
+            switch (lookup.Status)
+            {
+                case GitHubLookupStatus.NotFound:
+                    _shell.Inform("Link to GitHub", $"{repo} wasn't found on GitHub. Check the spelling (it may be private or renamed).");
+                    return;
+                case GitHubLookupStatus.NoReleases
+                    when !_shell.Confirm(
+                        "Link to GitHub",
+                        $"{repo} has no releases or version tags yet, so there's nothing to compare. Link it anyway?"
+                    ):
+                    return;
+            }
+
+            _gitHub.Link(mod, repo);
+            var link = _gitHub.Find(mod) ?? new GitHubSource(GitHubSource.KeyFor(mod), repo);
+            ApplyGitHubLookup(row, link, lookup);
+            Activity.Add(new LogEntry(_now(), RunLogLevel.Success, $"Linked {mod.DisplayName} to GitHub {repo}."));
+        }
+        finally
+        {
+            IsBusyLinking = false;
+        }
+    }
+
+    /// <summary>Removes the user's GitHub link. A built-in community link, if there is one, applies again.</summary>
+    [RelayCommand]
+    private async Task UnlinkGitHubAsync(ModRowViewModel? row)
+    {
+        if (row is not { CanUnlinkGitHub: true })
+        {
+            return;
+        }
+
+        var mod = row.Mod;
+        var repo = row.GitHub!.Repo;
+        _gitHub.Unlink(mod);
+
+        if (_gitHub.Find(mod) is { } builtIn && _lastResult is not null)
+        {
+            ApplyGitHubLookup(row, builtIn, await _gitHub.LookupAsync(builtIn.Repo, GitHubToken));
+        }
+        else
+        {
+            mod.SetGitHub(null);
+            mod.SetUpdateSuppressed(false);
+            row.IgnoreSource = null;
+            row.Refresh();
+            RebuildStatusLists();
+        }
+
+        Activity.Add(new LogEntry(_now(), RunLogLevel.Info, $"Removed the GitHub link {repo} from {mod.DisplayName}."));
+    }
+
+    [ObservableProperty]
+    private bool _isBusyLinking;
+
+    private void ApplyGitHubLookup(ModRowViewModel row, GitHubSource link, GitHubLookup lookup)
+    {
+        var sptVersion = _lastResult?.ForgeSptVersion ?? _lastResult?.SptVersion;
+        if (sptVersion is null)
+        {
+            return;
+        }
+
+        var mod = row.Mod;
+        mod.SetGitHub(GitHubUpdateResolver.Evaluate(mod.LocalVersion, link, lookup, sptVersion));
+
+        var store = _ignoreStoreFactory();
+        var ignored = mod.HasGitHubUpdate && store.IsIgnored(mod);
+        mod.SetUpdateSuppressed(ignored);
+        row.IgnoreSource = ignored ? store.GetIgnoreSource(mod) : null;
+        row.Refresh();
+        RebuildStatusLists();
+    }
+
+    /// <summary>Saves (or clears) the GitHub token used to check off-Forge mods.</summary>
+    [RelayCommand]
+    private void SetGitHubToken()
+    {
+        var input = _shell.Ask(
+            "GitHub token",
+            "Optional. Without a token GitHub allows 60 checks an hour, which is plenty for a few linked mods. A personal access token with no scopes (read-only public access) raises that to 5000. It's stored encrypted for your Windows user. Leave empty to remove it.",
+            null,
+            isSecret: true,
+            okText: "Save"
+        );
+        if (input is null)
+        {
+            return;
+        }
+
+        _settings.GitHubTokenProtected = TokenProtector.Protect(input);
+        _settingsStore.Save(_settings);
+        OnPropertyChanged(nameof(HasGitHubToken));
+        OnPropertyChanged(nameof(GitHubTokenLabel));
+        Activity.Add(
+            new LogEntry(_now(), RunLogLevel.Success, HasGitHubToken ? "GitHub token saved." : "GitHub token removed.")
+        );
+    }
+
+    private ModCheckResult? _lastResult;
 
     // ===== Commands: maintenance =====
 
@@ -686,7 +854,14 @@ public sealed partial class MainViewModel : ObservableObject
         Section("Missing dependencies", MissingDependencies.Select(d => $"{d.Name} {d.Version}"));
         Section("Dependency conflicts", DependencyConflicts.Select(c => $"{c.ModName}: {c.Description}"));
         Section("Install problems", Problems.Where(p => p.IsSevere).Select(p => $"{p.Title}: {p.Detail}"));
-        Section("Not on Forge", NotOnForge.Select(m => $"{m.Name} {m.InstalledVersion}"));
+        Section(
+            "Off Forge",
+            NotOnForge.Select(m =>
+                m.GitHub is { } gh
+                    ? $"{m.Name} {m.InstalledVersion} (GitHub {gh.Repo}: {(m.StatusKind == ModStatusKind.NotOnForge ? gh.Reason : m.StatusText)})"
+                    : $"{m.Name} {m.InstalledVersion}"
+            )
+        );
 
         sb.AppendLine();
         sb.Append($"_{AppVersionText}_");

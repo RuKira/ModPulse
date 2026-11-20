@@ -17,6 +17,8 @@
   <ItemGroup>
     <!-- The community ignore list ships inside ModPulse so it applies without a download (see BuiltInIgnoreList). -->
     <EmbeddedResource Include="..\..\community\ignored-updates.json" LogicalName="ModPulse.Community.ignored-updates.json" />
+    <!-- Community GitHub links for off-Forge mods (see BuiltInGitHubSources). -->
+    <EmbeddedResource Include="..\..\community\github-sources.json" LogicalName="ModPulse.Community.github-sources.json" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FuzzySharp" Version="2.0.2" />

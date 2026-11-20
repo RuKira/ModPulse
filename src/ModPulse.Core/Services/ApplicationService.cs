@@ -22,6 +22,8 @@ public sealed class ApplicationService(
     IUpdateCheckService updateCheckService,
     IIgnoredUpdateStore ignoredUpdateStore,
     IRemoteIgnoreFileClient remoteIgnoreFileClient,
+    IGitHubSourceStore gitHubSourceStore,
+    IGitHubReleaseClient gitHubReleaseClient,
     IModCheckReporter reporter,
     ILogger<ApplicationService> logger
 ) : IApplicationService
@@ -227,7 +229,8 @@ public sealed class ApplicationService(
     {
         foreach (var mod in mods)
         {
-            if (mod.UpdateStatus == UpdateStatus.UpdateAvailable && ignoredUpdateStore.IsIgnored(mod))
+            var hasUpdate = mod.UpdateStatus == UpdateStatus.UpdateAvailable || (!mod.IsMatched && mod.HasGitHubUpdate);
+            if (hasUpdate && ignoredUpdateStore.IsIgnored(mod))
             {
                 mod.SetUpdateSuppressed(true);
             }
@@ -706,6 +709,9 @@ public sealed class ApplicationService(
         );
         logger.LogInformation("Identified {Count} addon(s) or bundled part(s) of installed mods", belonging);
 
+        // Off-Forge mods the user (or the community list) linked to a GitHub repository.
+        await CheckGitHubSourcesAsync(mods, sptVersion, cancellationToken);
+
         reporter.Success("Forge verification complete!");
         reporter.Blank();
 
@@ -713,6 +719,41 @@ public sealed class ApplicationService(
         reporter.UnverifiedMods(mods);
 
         reporter.Rule();
+    }
+
+    /// <summary>
+    /// Checks off-Forge mods linked to a GitHub repository against its latest release. Never fails the run: GitHub
+    /// problems leave the mod's GitHub status unknown.
+    /// </summary>
+    private async Task CheckGitHubSourcesAsync(
+        List<Mod> mods,
+        SemanticVersioning.Version sptVersion,
+        CancellationToken cancellationToken
+    )
+    {
+        var linked = mods.Count(m => !m.IsMatched && !m.BelongsToAnotherMod && gitHubSourceStore.Find(m) is not null);
+        if (linked == 0)
+        {
+            return;
+        }
+
+        reporter.Status($"Checking {linked} off-Forge mod(s) on GitHub...");
+        var summary = await GitHubUpdateResolver.ResolveAsync(
+            mods,
+            gitHubSourceStore,
+            gitHubReleaseClient,
+            sptVersion,
+            cancellationToken
+        );
+        logger.LogInformation("Checked {Count} off-Forge mod(s) against GitHub", summary.Checked);
+
+        if (summary.RateLimitedUntil is { } until)
+        {
+            logger.LogWarning("GitHub rate limit reached; resets at {Reset}", until);
+            reporter.Warning(
+                $"GitHub's rate limit was reached; some off-Forge mods weren't checked. Try again after {until.ToLocalTime():HH:mm}, or add a GitHub token."
+            );
+        }
     }
 
     /// <summary>

@@ -88,7 +88,7 @@ public sealed class IgnoredUpdateWorkflowTests
     public void BuildNewSet_preserves_entries_for_mods_not_evaluated_this_run()
     {
         var existing = new List<IgnoredUpdate> { Entry(1), Entry(2) };
-        var evaluated = new HashSet<int> { 1 }; // only mod 1 was installed/evaluated this run
+        var evaluated = new HashSet<string> { "1" }; // only mod 1 was installed/evaluated this run
 
         var result = IgnoredUpdateWorkflow.BuildNewSet(existing, evaluated, []);
 
@@ -100,7 +100,7 @@ public sealed class IgnoredUpdateWorkflowTests
     public void BuildNewSet_drops_evaluated_but_unselected_entries()
     {
         var existing = new List<IgnoredUpdate> { Entry(1) };
-        var evaluated = new HashSet<int> { 1 };
+        var evaluated = new HashSet<string> { "1" };
 
         // Mod 1 was evaluated but not re-selected.
         var result = IgnoredUpdateWorkflow.BuildNewSet(existing, evaluated, []);
@@ -111,7 +111,7 @@ public sealed class IgnoredUpdateWorkflowTests
     [Fact]
     public void BuildNewSet_adds_selected_entries()
     {
-        var result = IgnoredUpdateWorkflow.BuildNewSet([], new HashSet<int> { 5 }, [Entry(5, latest: "2.0.0")]);
+        var result = IgnoredUpdateWorkflow.BuildNewSet([], new HashSet<string> { "5" }, [Entry(5, latest: "2.0.0")]);
 
         Assert.Single(result);
         Assert.Equal(5, result[0].ApiModId);
@@ -122,7 +122,7 @@ public sealed class IgnoredUpdateWorkflowTests
     public void BuildNewSet_keeps_reselected_entry_without_duplicating()
     {
         var existing = new List<IgnoredUpdate> { Entry(1) };
-        var evaluated = new HashSet<int> { 1 };
+        var evaluated = new HashSet<string> { "1" };
 
         // Mod 1 re-selected: arrives in both existing and selected.
         var result = IgnoredUpdateWorkflow.BuildNewSet(existing, evaluated, [Entry(1)]);

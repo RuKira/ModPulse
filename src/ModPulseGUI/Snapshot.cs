@@ -56,6 +56,31 @@ internal static class Snapshot
         await Settle();
         Save(window, Path.Combine(outDir, "3-details.png"));
 
+        // Off Forge tab with a GitHub-linked mod selected, when there is one.
+        if (viewModel.NotOnForge.FirstOrDefault(m => m.IsGitHubLinked) is { } linked)
+        {
+            viewModel.SelectedTabIndex = 4;
+            viewModel.SelectedMod = linked;
+            await Settle();
+            Save(window, Path.Combine(outDir, "5-github.png"));
+        }
+
+        // The link dialog.
+        var dialog = new InputDialog(
+            "Link to GitHub",
+            "Where is ManimalTerminal published? Paste its GitHub repository (owner/repo) or any github.com link to it. ModPulse checks its releases for updates; it never downloads anything.",
+            "owner/repo",
+            isSecret: false,
+            okText: "Link"
+        )
+        {
+            Owner = window,
+        };
+        dialog.Show();
+        await Settle();
+        Save(dialog, Path.Combine(outDir, "6-link-dialog.png"));
+        dialog.Close();
+
         File.WriteAllText(Path.Combine(outDir, "summary.md"), viewModel.BuildSummary());
         Application.Current.Shutdown();
     }

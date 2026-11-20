@@ -21,10 +21,14 @@ public sealed class IgnoredUpdateWorkflow(
     /// <inheritdoc />
     public async Task RunAsync(IReadOnlyList<Mod>? mods, CancellationToken cancellationToken = default)
     {
-        // One row per Forge mod id (paired server/client mods share an id and a single table row).
+        // One row per Forge mod id (paired server/client mods share an id and a single table row), plus off-Forge mods
+        // with a newer release on their linked GitHub repository.
         var candidates = (mods ?? [])
-            .Where(m => m is { UpdateStatus: UpdateStatus.UpdateAvailable, ApiModId: not null })
-            .GroupBy(m => m.ApiModId!.Value)
+            .Where(m =>
+                m is { UpdateStatus: UpdateStatus.UpdateAvailable, ApiModId: not null }
+                || (!m.IsMatched && m.HasGitHubUpdate)
+            )
+            .GroupBy(m => IgnoredUpdate.IdentityOf(m)!)
             .Select(g => g.First())
             .ToList();
 
@@ -86,7 +90,7 @@ public sealed class IgnoredUpdateWorkflow(
             var url =
                 !string.IsNullOrWhiteSpace(mod.ApiUrl) ? mod.ApiUrl
                 : mod.ApiModId.HasValue ? ForgeUrls.ModPage(mod.ApiModId.Value, mod.ApiSlug)
-                : null;
+                : mod.GitHub?.ReleaseUrl;
 
             if (!string.IsNullOrWhiteSpace(url) && seen.Add(url))
             {
@@ -107,9 +111,13 @@ public sealed class IgnoredUpdateWorkflow(
         CancellationToken cancellationToken
     )
     {
-        var preIgnoredIds = candidates.Where(m => m.UpdateSuppressed).Select(m => m.ApiModId!.Value).ToHashSet();
-        var selected = reporter.SelectUpdatesToIgnore(candidates, preIgnoredIds);
-        var chosen = selected.Select(ToIgnoredUpdate).ToList();
+        var preIgnored = candidates.Where(m => m.UpdateSuppressed)
+            .Select(m => IgnoredUpdate.IdentityOf(m)!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selected = reporter.SelectUpdatesToIgnore(candidates, preIgnored);
+        var chosen = selected.Select(m => IgnoredUpdate.For(m, IgnoreSource.User, DateTimeOffset.UtcNow))
+            .OfType<IgnoredUpdate>()
+            .ToList();
 
         PersistSelection(mods, chosen);
 
@@ -118,7 +126,11 @@ public sealed class IgnoredUpdateWorkflow(
 
     private void PersistSelection(IReadOnlyList<Mod> mods, IReadOnlyList<IgnoredUpdate> chosen)
     {
-        var evaluatedIds = mods.Where(m => m.IsMatched).Select(m => m.ApiModId!.Value).ToHashSet();
+        // Mods checked this run: Forge mods by id, linked off-Forge mods by repository.
+        var evaluatedIds = mods.Where(m => m.IsMatched)
+            .Select(m => m.ApiModId!.Value.ToString())
+            .Concat(mods.Where(m => !m.IsMatched && m.GitHub is not null).Select(m => "github:" + m.GitHub!.Repo))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var newSet = BuildNewSet(store.Load(), evaluatedIds, chosen);
         store.Save(newSet);
     }
@@ -189,11 +201,11 @@ public sealed class IgnoredUpdateWorkflow(
     /// </summary>
     internal static List<IgnoredUpdate> BuildNewSet(
         IReadOnlyList<IgnoredUpdate> existing,
-        ISet<int> evaluatedApiModIds,
+        ISet<string> evaluatedModIdentities,
         IReadOnlyList<IgnoredUpdate> selected
     )
     {
-        var result = existing.Where(e => !evaluatedApiModIds.Contains(e.ApiModId)).ToList();
+        var result = existing.Where(e => !evaluatedModIdentities.Contains(e.ModIdentity)).ToList();
         var keys = result.Select(e => e.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in selected)
@@ -205,18 +217,5 @@ public sealed class IgnoredUpdateWorkflow(
         }
 
         return result;
-    }
-
-    private static IgnoredUpdate ToIgnoredUpdate(Mod mod)
-    {
-        return new IgnoredUpdate(
-            ApiModId: mod.ApiModId!.Value,
-            LocalVersion: mod.LocalVersion,
-            IgnoredLatestVersion: mod.LatestVersion!,
-            Name: mod.DisplayName,
-            Guid: string.IsNullOrWhiteSpace(mod.Guid) ? null : mod.Guid,
-            Source: IgnoreSource.User,
-            DismissedUtc: DateTimeOffset.UtcNow
-        );
     }
 }

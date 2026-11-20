@@ -197,6 +197,18 @@ public sealed class Mod
     /// <summary>Set when this plugin is a bundled part of another installed mod (see <see cref="SetPartOf"/>).</summary>
     public Mod? PartOf { get; private set; }
 
+    /// <summary>
+    /// Set for an off-Forge mod linked to a GitHub repository: what its latest release says about the installed
+    /// version.
+    /// </summary>
+    public GitHubMatch? GitHub { get; private set; }
+
+    /// <summary>True when a linked GitHub repository has a newer release (an update, not held back for legacy SPT).</summary>
+    public bool HasGitHubUpdate
+    {
+        get { return GitHub?.Status == GitHubMatchStatus.UpdateAvailable; }
+    }
+
     /// <summary>True when this plugin was identified as an addon or a bundled part of another mod.</summary>
     public bool BelongsToAnotherMod
     {
@@ -339,6 +351,12 @@ public sealed class Mod
     public void SetPartOf(Mod parent)
     {
         PartOf = parent;
+    }
+
+    /// <summary>Records what the linked GitHub repository says (null clears it).</summary>
+    public void SetGitHub(GitHubMatch? match)
+    {
+        GitHub = match;
     }
 
     public void SetLocalSptIncompatible(string reason, string? compatibleVersion = null)

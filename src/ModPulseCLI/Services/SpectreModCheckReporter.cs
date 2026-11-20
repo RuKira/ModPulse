@@ -247,7 +247,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     /// <inheritdoc />
     public void VersionCompatibilityResults(List<Mod> mods, SemanticVersioning.Version sptVersion)
     {
-        var incompatibleMods = mods.Where(m => m.IsLocalSptIncompatible).ToList();
+        var incompatibleMods = ByName(mods.Where(m => m.IsLocalSptIncompatible)).ToList();
 
         if (incompatibleMods.Count == 0)
         {
@@ -309,7 +309,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
 
         var tree = new Tree("[yellow]Mod loading warnings[/]");
 
-        foreach (var mod in modsWithWarnings)
+        foreach (var mod in ByName(modsWithWarnings))
         {
             var modType = mod.IsServerMod ? "Server" : "Client";
             var modName = !string.IsNullOrWhiteSpace(mod.LocalName) ? mod.LocalName : Path.GetFileName(mod.FilePath);
@@ -351,7 +351,9 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
         {
             AnsiConsole.MarkupLine($"[green]Matched {result.ReconciledPairs.Count} server/client mod pairs.[/]");
 
-            var pairsWithNotes = result.ReconciledPairs.Where(p => p.Notes.Count > 0).ToList();
+            var pairsWithNotes = result.ReconciledPairs.Where(p => p.Notes.Count > 0)
+                .OrderBy(p => p.SelectedMod.LocalName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
             if (pairsWithNotes.Count > 0)
             {
                 AnsiConsole.WriteLine();
@@ -420,8 +422,8 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
         );
         AnsiConsole.WriteLine();
 
-        var serverInClient = report.WrongFolder.Where(m => m.IsServerMod).ToList();
-        var clientInServer = report.WrongFolder.Where(m => !m.IsServerMod).ToList();
+        var serverInClient = report.WrongFolder.Where(m => m.IsServerMod).OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var clientInServer = report.WrongFolder.Where(m => !m.IsServerMod).OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
         if (serverInClient.Count > 0)
         {
@@ -477,7 +479,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
                 "[yellow]Unrelated mods share one folder under[/] [grey](BepInEx/plugins)[/][yellow]. One is likely in the wrong place. Review the install instructions for each[/]"
             );
             directoryNode = tree.AddNode($"[grey]{directory.Directory.EscapeMarkup()}[/]");
-            foreach (var mod in directory.Mods)
+            foreach (var mod in directory.Mods.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
             {
                 AddMisplacedModNode(directoryNode, mod);
             }
@@ -488,7 +490,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
                 "[yellow]Mods found inside another mod's folder under[/] [grey](BepInEx/plugins)[/][yellow]. Review the mod's installation instructions[/]"
             );
             directoryNode = tree.AddNode($"[grey]{directory.Directory.EscapeMarkup()}[/]");
-            foreach (var mod in directory.Misplaced)
+            foreach (var mod in directory.Misplaced.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
             {
                 AddMisplacedModNode(directoryNode, mod);
             }
@@ -514,7 +516,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     public void UnverifiedMods(List<Mod> mods)
     {
         // Addons and bundled parts of installed mods are listed separately (see Addons).
-        var unverifiedMods = mods.Where(m => m.Status == ModStatus.NoMatch && !m.BelongsToAnotherMod).ToList();
+        var unverifiedMods = ByName(mods.Where(m => m.Status == ModStatus.NoMatch && !m.BelongsToAnotherMod)).ToList();
 
         if (unverifiedMods.Count == 0)
         {
@@ -543,6 +545,11 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
             {
                 modNode.AddNode($"[grey]Path: {mod.FilePath.EscapeMarkup()}[/]");
             }
+
+            if (mod.GitHub is { } github)
+            {
+                modNode.AddNode(FormatGitHubStatus(github, mod.LocalVersion));
+            }
         }
 
         AnsiConsole.Write(tree);
@@ -551,6 +558,13 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
         AnsiConsole.MarkupLine(
             "[grey]These were not matched to a Forge listing. That's expected for a mod that isn't published on the Forge, or for a mod which includes multiple plugins where only one uses the GUID linked to the Forge. No action is needed unless you expected one of these to be its own mod on Forge.[/]"
         );
+
+        if (unverifiedMods.Any(m => m.GitHub is null))
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]A mod published on GitHub can be linked to its repository for update checks: use ModPulseGUI's Off Forge tab, or add it to [white]{GitHubOptions.DefaultSourcesFilePath.EscapeMarkup()}[/].[/]"
+            );
+        }
         AnsiConsole.WriteLine();
     }
 
@@ -693,7 +707,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     {
         var tree = new Tree("[yellow]Dependency conflicts[/]");
 
-        foreach (var conflict in conflicts)
+        foreach (var conflict in conflicts.OrderBy(c => c.ModName, StringComparer.OrdinalIgnoreCase))
         {
             var modNode = tree.AddNode($"[white]{conflict.ModName.EscapeMarkup()}[/]");
             modNode.AddNode($"[yellow]{conflict.Description.EscapeMarkup()}[/]");
@@ -716,7 +730,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     {
         var tree = new Tree("[red]Missing dependencies[/]");
 
-        foreach (var dep in missingDeps)
+        foreach (var dep in missingDeps.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase))
         {
             // Link mod name to Forge page when a usable URL is available, otherwise show it in plain white.
             var url =
@@ -762,7 +776,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     {
         var changesNode = modNode.AddNode("[grey]Dependency changes:[/]");
 
-        foreach (var dep in delta.Added)
+        foreach (var dep in delta.Added.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase))
         {
             // Link the dependency name to its Forge page when a usable URL is available, otherwise show it plain.
             var url =
@@ -793,7 +807,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
             }
         }
 
-        foreach (var dep in delta.Removed)
+        foreach (var dep in delta.Removed.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase))
         {
             var wasVersion = dep.InstalledVersion ?? dep.RecommendedVersion;
             changesNode.AddNode(
@@ -809,10 +823,21 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
         var verifiedMods = mods.Where(m => m.IsMatched && m.LatestVersion is not null)
             .GroupBy(m => m.ApiModId!.Value)
             .Select(g => g.OrderByDescending(m => SemVer.ParseOrZero(m.LocalVersion)).First())
+            .OrderBy(m => m.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        var gitHubUpdates = ByName(mods.Where(m => !m.IsMatched && m.HasGitHubUpdate && !m.UpdateSuppressed)).ToList();
 
         if (verifiedMods.Count == 0)
         {
+            if (gitHubUpdates.Count > 0)
+            {
+                AnsiConsole.WriteLine();
+                var gitHubTree = new Tree("[red]Updates available[/]");
+                AddGitHubUpdateNodes(gitHubTree, gitHubUpdates);
+                AnsiConsole.Write(gitHubTree);
+            }
+
             AddonSummary(mods);
             return;
         }
@@ -865,7 +890,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
         var modsWithUpdates = verifiedMods
             .Where(m => m.UpdateStatus == UpdateStatus.UpdateAvailable && !m.UpdateSuppressed)
             .ToList();
-        if (modsWithUpdates.Count > 0)
+        if (modsWithUpdates.Count > 0 || gitHubUpdates.Count > 0)
         {
             AnsiConsole.WriteLine();
 
@@ -890,6 +915,8 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
                     AddUpdateDependencyChangeNodes(modNode, mod.UpdateDependencyChanges);
                 }
             }
+
+            AddGitHubUpdateNodes(updatesTree, gitHubUpdates);
 
             AnsiConsole.Write(updatesTree);
         }
@@ -954,8 +981,12 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     /// </summary>
     private static void AddonSummary(List<Mod> mods)
     {
-        var addons = mods.Where(m => m.Addon is not null).OrderBy(m => m.Addon!.Addon.Name).ToList();
-        var parts = mods.Where(m => m.Addon is null && m.PartOf is not null).OrderBy(m => m.LocalName).ToList();
+        var addons = mods.Where(m => m.Addon is not null)
+            .OrderBy(m => m.Addon!.Addon.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var parts = mods.Where(m => m.Addon is null && m.PartOf is not null)
+            .OrderBy(m => m.LocalName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         if (addons.Count == 0 && parts.Count == 0)
         {
             return;
@@ -1052,7 +1083,7 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<Mod> SelectUpdatesToIgnore(IReadOnlyList<Mod> candidates, ISet<int> preIgnoredApiModIds)
+    public IReadOnlyList<Mod> SelectUpdatesToIgnore(IReadOnlyList<Mod> candidates, ISet<string> preIgnored)
     {
         AnsiConsole.WriteLine();
 
@@ -1064,10 +1095,10 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
             .InstructionsText("[grey](Space to toggle, enter to confirm. Checked entries are ignored.)[/]")
             .UseConverter(FormatIgnoreChoice);
 
-        foreach (var mod in candidates)
+        foreach (var mod in ByName(candidates))
         {
             var item = prompt.AddChoice(mod);
-            if (mod.ApiModId.HasValue && preIgnoredApiModIds.Contains(mod.ApiModId.Value))
+            if (IgnoredUpdate.IdentityOf(mod) is { } identity && preIgnored.Contains(identity))
             {
                 item.Select();
             }
@@ -1157,10 +1188,52 @@ public sealed class SpectreModCheckReporter : IModCheckReporter
     /// <summary>
     /// Formats a single mod as a multi-select choice: name plus the local-to-latest version transition.
     /// </summary>
+    /// <summary>Mods A–Z by display name, ignoring case (the same order as the GUI's lists).</summary>
+    internal static IEnumerable<Mod> ByName(IEnumerable<Mod> mods)
+    {
+        return mods.OrderBy(m => m.DisplayName, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Adds off-Forge mods with a newer GitHub release to the updates tree, marked "(GitHub)".</summary>
+    private static void AddGitHubUpdateNodes(Tree tree, IReadOnlyList<Mod> gitHubUpdates)
+    {
+        foreach (var mod in gitHubUpdates)
+        {
+            var github = mod.GitHub!;
+            var modNode = tree.AddNode(
+                $"{FormatModLink(mod.DisplayName, github.RepoUrl)} [grey](GitHub {github.Repo.EscapeMarkup()})[/]"
+            );
+            modNode.AddNode(
+                $"[grey]{mod.LocalVersion.EscapeMarkup()}[/] [yellow]->[/] [green]{(github.Version ?? "?").EscapeMarkup()}[/]"
+            );
+            modNode.AddNode($"[grey]Release:[/] [link]{github.ReleaseUrl.EscapeMarkup()}[/]");
+            modNode.AddNode("[grey]GitHub doesn't list SPT versions: check the release supports your SPT before updating.[/]");
+        }
+    }
+
+    /// <summary>One line describing a linked GitHub repository's verdict.</summary>
+    private static string FormatGitHubStatus(GitHubMatch github, string installedVersion)
+    {
+        var repo = $"[blue]GitHub {github.Repo.EscapeMarkup()}[/]";
+        return github.Status switch
+        {
+            GitHubMatchStatus.UpdateAvailable =>
+                $"{repo}: [red]update[/] {installedVersion.EscapeMarkup()} -> {(github.Version ?? "?").EscapeMarkup()}",
+            GitHubMatchStatus.UpToDate => $"{repo}: [green]up to date[/] ({(github.Version ?? "?").EscapeMarkup()})",
+            GitHubMatchStatus.NewerInstalled => $"{repo}: [blue]newer than the latest release[/] ({(github.Version ?? "?").EscapeMarkup()})",
+            _ => $"{repo}: [grey]{github.Reason.EscapeMarkup()}[/]",
+        };
+    }
+
     private static string FormatIgnoreChoice(Mod mod)
     {
         var name = mod.DisplayName.EscapeMarkup();
         var local = mod.LocalVersion.EscapeMarkup();
+        if (!mod.IsMatched && mod.GitHub is { } github)
+        {
+            return $"{name}  [grey]{local} -> {(github.Version ?? "?").EscapeMarkup()} (GitHub)[/]";
+        }
+
         var latest = (mod.LatestVersion ?? "?").EscapeMarkup();
         return $"{name}  [grey]{local} -> {latest}[/]";
     }

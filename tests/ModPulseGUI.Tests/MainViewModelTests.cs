@@ -346,5 +346,19 @@ public sealed class MainViewModelTests : IDisposable
             ConfirmCount++;
             return ConfirmAnswer;
         }
+
+        public Queue<string?> AskAnswers { get; } = new();
+
+        public List<string> Informed { get; } = [];
+
+        public void Inform(string title, string message)
+        {
+            Informed.Add(message);
+        }
+
+        public string? Ask(string title, string message, string? initial = null, bool isSecret = false, string okText = "OK")
+        {
+            return AskAnswers.Count > 0 ? AskAnswers.Dequeue() : null;
+        }
     }
 }

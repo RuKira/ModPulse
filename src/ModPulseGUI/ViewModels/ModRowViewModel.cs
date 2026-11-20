@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using ModPulse.Models;
+using ModPulse.Services;
 using ModPulse.Utils;
 
 namespace ModPulse.Gui.ViewModels;
@@ -41,10 +42,115 @@ public sealed partial class ModRowViewModel : ObservableObject
         get { return Mod.Addon is not null; }
     }
 
-    /// <summary>Short tag next to the status: "Addon" or "Bundled", or null for a regular mod.</summary>
+    /// <summary>
+    /// Short tag next to the status: "Addon", "Bundled", or "GitHub" for an off-Forge mod linked to a repository; null
+    /// for a regular mod.
+    /// </summary>
     public string? RelationTag
     {
-        get { return Mod.Addon is not null ? "Addon" : Mod.PartOf is not null ? "Bundled" : null; }
+        get
+        {
+            return Mod.Addon is not null ? "Addon"
+                : Mod.PartOf is not null ? "Bundled"
+                : IsGitHubLinked ? "GitHub"
+                : null;
+        }
+    }
+
+    /// <summary>True for a mod that isn't on the Forge and isn't part of another mod (it can be linked to GitHub).</summary>
+    public bool IsOffForge
+    {
+        get { return !Mod.IsMatched && Mod.Addon is null && Mod.PartOf is null; }
+    }
+
+    /// <summary>The GitHub verdict for an off-Forge mod linked to a repository.</summary>
+    public GitHubMatch? GitHub
+    {
+        get { return IsOffForge ? Mod.GitHub : null; }
+    }
+
+    public bool IsGitHubLinked
+    {
+        get { return GitHub is not null; }
+    }
+
+    /// <summary>Any off-Forge mod can be linked (a built-in community link can be overridden by the user's own).</summary>
+    public bool CanLinkGitHub
+    {
+        get { return IsOffForge; }
+    }
+
+    /// <summary>Only the user's own links can be removed; built-in community links can only be replaced.</summary>
+    public bool CanUnlinkGitHub
+    {
+        get { return GitHub?.Origin == GitHubSourceOrigin.User; }
+    }
+
+    public string LinkGitHubLabel
+    {
+        get { return IsGitHubLinked ? "Change GitHub repo" : "Link GitHub repo"; }
+    }
+
+    /// <summary>"owner/repo · linked by you" or "owner/repo · community list".</summary>
+    public string? GitHubText
+    {
+        get
+        {
+            return GitHub is { } gh
+                ? $"{gh.Repo} · {(gh.Origin == GitHubSourceOrigin.User ? "linked by you" : "community list")}"
+                : null;
+        }
+    }
+
+    /// <summary>The latest release's tag and date, when one was found.</summary>
+    public string? GitHubReleaseText
+    {
+        get
+        {
+            if (GitHub?.Release is not { } release)
+            {
+                return null;
+            }
+
+            var kind = release.FromTags ? "Latest tag" : "Latest release";
+            var date = release.PublishedUtc is { } published ? $" · {published.ToLocalTime():yyyy-MM-dd}" : string.Empty;
+            return $"{kind} {release.Tag}{date}";
+        }
+    }
+
+    public string? GitHubRepoUrl
+    {
+        get { return GitHub?.RepoUrl; }
+    }
+
+    public string? GitHubReleaseUrl
+    {
+        get { return GitHub?.Release is not null ? GitHub.ReleaseUrl : null; }
+    }
+
+    /// <summary>The page button in the Updates list: the Forge page, or the GitHub repository.</summary>
+    public string? PageUrl
+    {
+        get { return ForgeUrl ?? GitHubRepoUrl; }
+    }
+
+    public string PageLabel
+    {
+        get { return ForgeUrl is null && GitHubRepoUrl is not null ? "GitHub" : "Forge page"; }
+    }
+
+    /// <summary>
+    /// A version mismatch the user ignored that the built-in community list doesn't have yet, so it can be reported.
+    /// </summary>
+    public bool CanReportMismatch
+    {
+        get
+        {
+            return StatusKind == ModStatusKind.Ignored
+                && IgnoreSource == ModPulse.Models.IgnoreSource.User
+                && IgnoredUpdate.For(Mod) is { } entry
+                && !BuiltInIgnoreList.Keys.Contains(entry.Key);
+        }
     }
 
     /// <summary>"Addon of ORBIT 3.0 3.1.1" / "Part of Show Me The Money", or null for a regular mod.</summary>
@@ -61,7 +167,7 @@ public sealed partial class ModRowViewModel : ObservableObject
         }
     }
 
-    /// <summary>Only regular Forge updates can be ignored (the ignore list is keyed by Forge mod ID).</summary>
+    /// <summary>Forge updates and GitHub releases of linked off-Forge mods can be ignored; addons can't.</summary>
     public bool CanIgnore
     {
         get { return StatusKind == ModStatusKind.Update && !IsAddon; }
@@ -101,7 +207,7 @@ public sealed partial class ModRowViewModel : ObservableObject
     {
         get
         {
-            var latest = Mod.Addon?.LatestVersion ?? Mod.LatestVersion;
+            var latest = Mod.Addon?.LatestVersion ?? Mod.LatestVersion ?? GitHub?.Version;
             return string.IsNullOrWhiteSpace(latest) ? "—" : latest!;
         }
     }
@@ -159,6 +265,11 @@ public sealed partial class ModRowViewModel : ObservableObject
             if (Mod.Addon is { } addon)
             {
                 return addon.DownloadLink;
+            }
+
+            if (GitHub is { } github)
+            {
+                return StatusKind is ModStatusKind.Update or ModStatusKind.Ignored ? github.ReleaseUrl : null;
             }
 
             if (Mod.ApiModId is not { } id)
@@ -242,7 +353,7 @@ public sealed partial class ModRowViewModel : ObservableObject
 
     /// <summary>Where the ignore entry for this mod's update comes from (null when not ignored).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanUnignore))]
+    [NotifyPropertyChangedFor(nameof(CanUnignore), nameof(CanReportMismatch))]
     private IgnoreSource? _ignoreSource;
 
     /// <summary>
@@ -254,7 +365,7 @@ public sealed partial class ModRowViewModel : ObservableObject
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanUnignore), nameof(CanIgnore))]
+    [NotifyPropertyChangedFor(nameof(CanUnignore), nameof(CanIgnore), nameof(CanReportMismatch))]
     private ModStatusKind _statusKind;
 
     [ObservableProperty]
@@ -268,8 +379,18 @@ public sealed partial class ModRowViewModel : ObservableObject
     public void Refresh()
     {
         (StatusKind, StatusText, Reason) = Describe(Mod, IgnoreSource);
-        OnPropertyChanged(nameof(DownloadUrl));
-        OnPropertyChanged(nameof(LatestVersion));
+        foreach (
+            var name in new[]
+            {
+                nameof(DownloadUrl), nameof(LatestVersion), nameof(GitHub), nameof(IsGitHubLinked),
+                nameof(CanUnlinkGitHub), nameof(LinkGitHubLabel), nameof(GitHubText), nameof(GitHubReleaseText),
+                nameof(GitHubRepoUrl), nameof(GitHubReleaseUrl), nameof(PageUrl), nameof(PageLabel),
+                nameof(RelationTag), nameof(CanReportMismatch),
+            }
+        )
+        {
+            OnPropertyChanged(name);
+        }
     }
 
     /// <summary>Turns Forge's machine reason codes into a sentence.</summary>
@@ -338,9 +459,31 @@ public sealed partial class ModRowViewModel : ObservableObject
                 return (ModStatusKind.Incompatible, "Incompatible", FriendlyForgeReason(mod.IncompatibilityReason));
         }
 
+        if (!mod.IsMatched && mod.GitHub is { } github)
+        {
+            return github.Status switch
+            {
+                GitHubMatchStatus.UpdateAvailable when mod.UpdateSuppressed => (
+                    ModStatusKind.Ignored,
+                    "Ignored",
+                    ignoreSource is ModPulse.Models.IgnoreSource.BuiltIn or ModPulse.Models.IgnoreSource.Remote
+                        ? $"Known version mismatch (community list): the mod reports {mod.LocalVersion}, but it is GitHub's {github.Version}."
+                        : $"GitHub release {github.Version} ignored by you (marked as the same files as the installed version)."
+                ),
+                GitHubMatchStatus.UpdateAvailable => (ModStatusKind.Update, "Update", github.Reason),
+                GitHubMatchStatus.UpToDate => (ModStatusKind.UpToDate, "Up to date", github.Reason),
+                GitHubMatchStatus.NewerInstalled => (ModStatusKind.Newer, "Newer", github.Reason),
+                _ => (ModStatusKind.NotOnForge, "Off Forge", github.Reason),
+            };
+        }
+
         if (!mod.IsMatched)
         {
-            return (ModStatusKind.NotOnForge, "Not on Forge", "No matching Forge listing was found for this mod.");
+            return (
+                ModStatusKind.NotOnForge,
+                "Off Forge",
+                "No matching Forge listing was found for this mod. If it's published on GitHub, link its repository to check it for updates."
+            );
         }
 
         return mod.UpdateStatus switch

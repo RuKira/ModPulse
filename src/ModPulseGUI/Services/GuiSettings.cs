@@ -16,6 +16,9 @@ public sealed class GuiSettings
     /// <summary>Merge the community ignore list before each check.</summary>
     public bool FetchCommunityIgnores { get; set; }
 
+    /// <summary>The GitHub token, encrypted for the current Windows user (see <see cref="TokenProtector"/>).</summary>
+    public string? GitHubTokenProtected { get; set; }
+
     /// <summary>Window size, so the app reopens the way it was left.</summary>
     public double WindowWidth { get; set; } = 1280;
 

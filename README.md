@@ -40,7 +40,8 @@ the cache and take seconds (see [Cache and data](#cache-and-data)).
 - **Dependencies.** Missing dependencies, both the ones listed on the Forge and the ones a mod declares in its own DLL
   (some mods need another mod without listing it on the Forge). Also known conflicts between installed mods, and
   dependencies that a pending update adds or drops.
-- **Mods it can't find on the Forge**, listed separately so you know which ones to check by hand.
+- **Mods that aren't on the Forge**, listed separately. One published on GitHub can be linked to its repository, and
+  ModPulse checks its releases for updates (see [Off-Forge mods on GitHub](#off-forge-mods-on-github)).
 - **Addons and bundled parts.** Forge addons are matched to their parent mod, and mods shipped inside another mod
   aren't reported as unknown.
 - **Library mods.** DLLs with no BepInEx plugin of their own that other mods depend on (e.g. Effects Manager Framework)
@@ -52,8 +53,8 @@ the cache and take seconds (see [Cache and data](#cache-and-data)).
   - Server and client halves of a mod whose versions or GUIDs don't match.
 - **SPT and ModPulse updates.** A newer SPT patch for your version, and a newer ModPulse release.
 
-In the GUI the results are split into tabs: Overview, Updates, Incompatible, Dependencies, Not on Forge, Install notes
-and All mods. Each mod has a details pane with its Forge page, download link, source code and its folder on disk.
+In the GUI the results are split into tabs: Overview, Updates, Incompatible, Dependencies, Off Forge, Install notes
+and All mods. Every list is sorted A–Z, in the CLI too. Each mod has a details pane with its Forge page, download link, source code and its folder on disk.
 *Copy summary* puts a plain-text report on your clipboard.
 
 ## Supported SPT versions
@@ -80,16 +81,49 @@ Server mods are read from `<server>/user/mods` (`package.json` mods on 3.x, DLL 
   flagged incompatible. An update is only offered when it was published for your SPT version (3.10.x, up to your
   installed patch); builds made for 3.11 or newer are never suggested.
 
+## Off-Forge mods on GitHub
+
+A mod that isn't on the Forge can be linked to its GitHub repository. ModPulse then compares the installed version with
+the repository's latest release (drafts and pre-releases are skipped; with no releases, the highest version tag is
+used).
+
+- **GUI**: on the Off Forge tab, press *Link GitHub repo* and paste `owner/repo` or any github.com link to it. The
+  details pane can change or remove the link.
+- **CLI**: reads the same links. To add one by hand, edit `%AppData%\ModPulse\github-sources.json`:
+
+  ```json
+  {
+    "schemaVersion": 1,
+    "sources": [
+      { "key": "com.author.mymod", "repo": "author/MyMod", "name": "My Mod" }
+    ]
+  }
+  ```
+
+  `key` is the mod's GUID (shown in the off-Forge list). For a mod without a GUID, use `name:` followed by its name
+  in lower case with spaces, dots, dashes and underscores removed.
+
+Some well-known off-Forge mods are linked out of the box ([community/github-sources.json](community/github-sources.json));
+a link of your own replaces a community one.
+
+**GitHub doesn't list SPT versions.** A newer release is shown as an update with a reminder to check that it supports
+your SPT; it's never counted as incompatible. On legacy SPT (3.9 and 3.10), a newer release is only offered when its
+title, notes or tag mention your SPT version (e.g. "3.10"); otherwise it's shown as information.
+
+**Rate limit.** Without a token GitHub allows 60 requests an hour, plenty for a handful of linked mods since answers
+are cached for 6 hours. A personal access token (no scopes needed) raises it to 5000: use *GitHub token* in the GUI's
+footer (stored encrypted for your Windows user), or set the `MODPULSE_GITHUB_TOKEN` environment variable for the CLI.
+
 ## Ignoring updates
 
 Sometimes a mod's DLL reports a different version than its Forge release, so ModPulse keeps offering an "update" you
 already have. You can ignore it:
 
-- **GUI**: *Ignore update* on the mod (and *Stop ignoring* to undo).
+- **GUI**: *Ignore* on the mod (and *Stop ignoring* to undo).
 - **CLI**: choose *Manage ignored updates* at the end of a run and tick the mods.
 
 An ignore is tied to the exact versions involved. When the mod really updates, or the author fixes the version, the
-update shows up again.
+update shows up again. GitHub releases of linked mods can be ignored the same way.
 
 ### Community ignore list
 
@@ -98,17 +132,21 @@ Known version mismatches are collected in [community/ignored-updates.json](commu
 - ModPulse ships with the list as it was at release, so those mismatches are hidden with no download.
 - You can also fetch the latest list (the GUI's *Fetch the latest community ignore list* option, or answer yes when
   the CLI asks). New entries are added to your own ignore list.
-- After you ignore something in the CLI that the list doesn't have yet, it offers to report it: your browser opens a
-  pre-filled GitHub issue for you to review and submit. Entries are checked before they're added to the list.
+- After you ignore something the list doesn't have yet, you can report it: the CLI offers it right away, and the GUI
+  shows *Report mismatch* on the mod. Your browser opens a pre-filled GitHub issue for you to review and submit.
+  Entries are checked before they're added to the list.
 
 ## Cache and data
 
 Everything ModPulse keeps is in `%AppData%\ModPulse`:
 
-- `cache\forge`: Forge responses. Update status is refreshed after 30 minutes; lookups, searches and dependencies keep
-  for 12–24 hours. Errors are never cached. Use *Fresh from Forge* (GUI) or `--refresh` (CLI) to ignore the cache for
+- `cache\forge`: Forge responses (and GitHub release answers for linked mods). Update status is refreshed after 30
+  minutes, GitHub releases after 6 hours; lookups, searches and dependencies keep for 12–24 hours. Errors are never
+  cached. Use *Fresh from Forge* (GUI) or `--refresh` (CLI) to ignore the cache for
   one run, or *Clear Forge cache* in the GUI.
 - `ignored-updates.json`: your ignored updates.
+- `github-sources.json`: your GitHub links for off-Forge mods.
+- `gui-settings.json`: the GUI's recent folders, options and (encrypted) GitHub token.
 - Logs (the GUI's *Open log* opens the folder).
 
 ## Privacy
@@ -116,7 +154,9 @@ Everything ModPulse keeps is in `%AppData%\ModPulse`:
 ModPulse reads your mod folders on your PC. Over the network it only:
 
 - queries the Forge API for the mods it finds (name, GUID, version);
-- reads the community ignore list and the latest ModPulse release from GitHub.
+- reads the community ignore list and the latest ModPulse release from GitHub;
+- reads the latest release of each GitHub repository you (or the community list) linked to an off-Forge mod, sending
+  your GitHub token only if you set one.
 
 It sends no account details, telemetry or information about your install anywhere else. Reporting an ignore only opens
 a GitHub page in your browser; nothing is sent until you submit it yourself.

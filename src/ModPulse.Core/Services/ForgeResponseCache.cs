@@ -43,11 +43,17 @@ public sealed class ForgeResponseCache : IForgeResponseCache
     /// <item>update status: 30 minutes, so new releases show up quickly;</item>
     /// <item>SPT version list: 6 hours;</item>
     /// <item>mod lookups and searches (including "not found"): 12 hours;</item>
-    /// <item>dependencies of a specific mod version: 24 hours.</item>
+    /// <item>dependencies of a specific mod version: 24 hours;</item>
+    /// <item>GitHub releases of off-Forge mods: 6 hours (GitHub allows 60 unauthenticated requests an hour).</item>
     /// </list>
     /// </summary>
     public static TimeSpan LifetimeFor(string url)
     {
+        if (url.Contains("api.github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return TimeSpan.FromHours(6);
+        }
+
         if (url.Contains("/mods/updates", StringComparison.OrdinalIgnoreCase))
         {
             return TimeSpan.FromMinutes(30);

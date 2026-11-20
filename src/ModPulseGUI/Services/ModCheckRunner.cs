@@ -9,7 +9,8 @@ namespace ModPulse.Gui.Services;
 /// <summary>Options for one check.</summary>
 /// <param name="Refresh">Ignore cached Forge answers (the CLI's <c>--refresh</c>).</param>
 /// <param name="FetchCommunityIgnores">Merge the community ignore list before checking.</param>
-public sealed record ModCheckRunOptions(bool Refresh, bool FetchCommunityIgnores);
+/// <param name="GitHubToken">Optional GitHub token for checking off-Forge mods (higher rate limit).</param>
+public sealed record ModCheckRunOptions(bool Refresh, bool FetchCommunityIgnores, string? GitHubToken = null);
 
 /// <summary>Runs a mod check.</summary>
 public interface IModCheckRunner
@@ -41,6 +42,10 @@ public sealed class ModCheckRunner : IModCheckRunner
         var services = new ServiceCollection();
         services.AddModPulseServices();
         services.Configure<ForgeCacheOptions>(o => o.Refresh = options.Refresh);
+        if (!string.IsNullOrWhiteSpace(options.GitHubToken))
+        {
+            services.Configure<GitHubOptions>(o => o.Token = options.GitHubToken);
+        }
         services.AddSingleton<IModCheckReporter>(new GuiModCheckReporter(updates, options.FetchCommunityIgnores));
 
         await using var provider = services.BuildServiceProvider();

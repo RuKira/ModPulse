@@ -22,6 +22,12 @@ public interface IShell
 
     /// <summary>Asks a yes/no question.</summary>
     bool Confirm(string title, string message);
+
+    /// <summary>Shows a message with an OK button.</summary>
+    void Inform(string title, string message);
+
+    /// <summary>Asks for one line of text (masked when <paramref name="isSecret"/>); null when cancelled.</summary>
+    string? Ask(string title, string message, string? initial = null, bool isSecret = false, string okText = "OK");
 }
 
 /// <summary>The real Windows implementation.</summary>
@@ -85,6 +91,16 @@ public sealed class WindowsShell : IShell
                 MessageBoxImage.Question
             )
             == MessageBoxResult.Yes;
+    }
+
+    public void Inform(string title, string message)
+    {
+        MessageBox.Show(Application.Current?.MainWindow!, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    public string? Ask(string title, string message, string? initial = null, bool isSecret = false, string okText = "OK")
+    {
+        return InputDialog.Ask(title, message, initial, isSecret, okText);
     }
 
     private static void TryStart(ProcessStartInfo info)

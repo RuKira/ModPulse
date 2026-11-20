@@ -112,10 +112,10 @@ public interface IModCheckReporter
     EndOfRunChoice PromptEndOfRun(int openableUpdateCount, bool canManageIgnoredUpdates);
 
     /// <summary>
-    /// Shows a checklist of update candidates (those in <paramref name="preIgnoredApiModIds"/> pre-checked) and returns
+    /// Shows a checklist of update candidates (those in <paramref name="preIgnored"/>, by <see cref="IgnoredUpdate.ModIdentity"/>, pre-checked) and returns
     /// the mods the user chose to ignore.
     /// </summary>
-    IReadOnlyList<Mod> SelectUpdatesToIgnore(IReadOnlyList<Mod> candidates, ISet<int> preIgnoredApiModIds);
+    IReadOnlyList<Mod> SelectUpdatesToIgnore(IReadOnlyList<Mod> candidates, ISet<string> preIgnored);
 
     /// <summary>Reports the outcome of opening update pages in the browser (how many of the total opened).</summary>
     void UpdatePagesOpened(int opened, int total);

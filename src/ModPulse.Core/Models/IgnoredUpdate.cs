@@ -33,17 +33,69 @@ public sealed record IgnoredUpdate(
     [property: JsonPropertyName("name")] string? Name = null,
     [property: JsonPropertyName("guid")] string? Guid = null,
     [property: JsonPropertyName("source")] IgnoreSource Source = IgnoreSource.User,
-    [property: JsonPropertyName("dismissedUtc")] DateTimeOffset? DismissedUtc = null
+    [property: JsonPropertyName("dismissedUtc")] DateTimeOffset? DismissedUtc = null,
+    [property: JsonPropertyName("github")] string? GitHubRepo = null
 )
 {
     /// <summary>
-    /// The match key: API mod id plus both version strings. Compared with <see cref="StringComparer.OrdinalIgnoreCase"/>
-    /// by callers.
+    /// The match key: the Forge mod id (or <c>github:owner/repo</c> for an off-Forge mod's GitHub update) plus both
+    /// version strings. Compared with <see cref="StringComparer.OrdinalIgnoreCase"/> by callers.
     /// </summary>
     [JsonIgnore]
     public string Key
     {
-        get { return $"{ApiModId}|{LocalVersion}|{IgnoredLatestVersion}"; }
+        get { return MakeKey(ApiModId, GitHubRepo, LocalVersion, IgnoredLatestVersion); }
+    }
+
+    /// <summary>
+    /// Which mod's update this entry is about: the Forge mod id, or <c>github:owner/repo</c> (see <see cref="IdentityOf"/>).
+    /// </summary>
+    [JsonIgnore]
+    public string ModIdentity
+    {
+        get { return IsGitHub ? "github:" + GitHubRepo : ApiModId.ToString(); }
+    }
+
+    /// <summary>
+    /// The identity of a mod's current update (matching <see cref="ModIdentity"/>), or null when it has none to ignore.
+    /// </summary>
+    public static string? IdentityOf(Mod mod)
+    {
+        return For(mod)?.ModIdentity;
+    }
+
+    /// <summary>True for an ignored GitHub release of an off-Forge mod (no Forge id).</summary>
+    [JsonIgnore]
+    public bool IsGitHub
+    {
+        get { return !string.IsNullOrWhiteSpace(GitHubRepo); }
+    }
+
+    /// <summary>Builds a match key; see <see cref="Key"/>.</summary>
+    public static string MakeKey(int apiModId, string? gitHubRepo, string localVersion, string latestVersion)
+    {
+        var id = string.IsNullOrWhiteSpace(gitHubRepo) ? apiModId.ToString() : "github:" + gitHubRepo;
+        return $"{id}|{localVersion}|{latestVersion}";
+    }
+
+    /// <summary>
+    /// The entry that ignores <paramref name="mod"/>'s current update: its Forge update, or its GitHub release when the
+    /// mod is off the Forge. Null when the mod has no update to ignore.
+    /// </summary>
+    public static IgnoredUpdate? For(Mod mod, IgnoreSource source = IgnoreSource.User, DateTimeOffset? dismissedUtc = null)
+    {
+        var guid = string.IsNullOrWhiteSpace(mod.Guid) ? null : mod.Guid;
+        if (mod is { ApiModId: { } id, LatestVersion: { } latest })
+        {
+            return new IgnoredUpdate(id, mod.LocalVersion, latest, mod.DisplayName, guid, source, dismissedUtc);
+        }
+
+        if (mod.GitHub is { Version: { } version } github && !mod.IsMatched)
+        {
+            return new IgnoredUpdate(0, mod.LocalVersion, version, mod.DisplayName, guid, source, dismissedUtc, github.Repo);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -54,7 +106,7 @@ public sealed record IgnoredUpdate(
     {
         get
         {
-            return ApiModId > 0
+            return (ApiModId > 0 || IsGitHub)
                 && !string.IsNullOrWhiteSpace(LocalVersion)
                 && !string.IsNullOrWhiteSpace(IgnoredLatestVersion);
         }

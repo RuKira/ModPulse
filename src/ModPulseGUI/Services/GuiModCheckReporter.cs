@@ -190,7 +190,7 @@ public sealed class GuiModCheckReporter(IProgress<RunUpdate> updates, bool fetch
         return EndOfRunChoice.Exit;
     }
 
-    public IReadOnlyList<Mod> SelectUpdatesToIgnore(IReadOnlyList<Mod> candidates, ISet<int> preIgnoredApiModIds)
+    public IReadOnlyList<Mod> SelectUpdatesToIgnore(IReadOnlyList<Mod> candidates, ISet<string> preIgnored)
     {
         return [];
     }
